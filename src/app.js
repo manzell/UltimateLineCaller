@@ -90,6 +90,7 @@
   let db = null, pushTimer = null;
   function save() {
     try { localStorage.setItem(KEY_STORE, JSON.stringify(Root)); } catch (e) { /* storage blocked: the session still works */ }
+    if (CloudLink) CloudLink.schedule();
     if (db && Root.teams.some((t) => !t.isExample)) { clearTimeout(pushTimer); pushTimer = setTimeout(() => { db.doc('teams/main').set({ json: JSON.stringify(Root), updatedAt: Root.updatedAt }).catch(() => {}); }, 1200); }
   }
   function load() {
@@ -491,9 +492,9 @@
       <div class="panel-head"><h2>Send report</h2><button type="button" class="btn small-btn primary" data-a="send-close">Done</button></div>
       <p>${list.length ? `${list.length} ${list.length === 1 ? 'subscriber' : 'subscribers'}. Addresses go in BCC so families don't see each other's email.` : 'No subscribers yet. You can still save the report.'}</p>
       <div class="chips">${native ? `<button type="button" class="btn small-btn primary" data-a="send-email" ${list.length ? '' : 'disabled'}>Open in email</button>` : ''}
-      ${downloads ? '<button type="button" class="btn small-btn" data-a="send-save">Save report file</button>' : ''}
+      ${downloads || (CloudLink && !native) ? '<button type="button" class="btn small-btn" data-a="send-save">Save report file</button>' : ''}
       <button type="button" class="btn small-btn" data-a="send-copy" ${list.length ? '' : 'disabled'}>Copy addresses</button></div>
-      ${!native ? '<p class="small muted">This preview can\'t open your email app. In the Android app, Open in email starts a message with the report attached and everyone in BCC.</p>' : ''}
+      ${!native ? '<p class="small muted">This page can\'t open your email app. In the Android app, Open in email starts a message with the report attached and everyone in BCC.</p>' : ''}
       ${reportNote ? `<p class="small" role="status">${esc(reportNote)}</p>` : ''}
       <textarea id="send-list" readonly aria-label="Subscriber addresses" class="send-list">${esc(list.join(', '))}</textarea>
       <div class="label">What families get</div>
@@ -806,6 +807,9 @@
       <div class="panel-head"><h2>Settings</h2><button type="button" class="btn small-btn primary" data-a="settings-close">Done</button></div>
       <div class="label">Color scheme</div>
       <div class="schemes">${SCHEMES.map(([k, l, d]) => `<button type="button" class="scheme" data-a="set-scheme" data-v="${k}" aria-pressed="${cur === k}" data-preview="${k}"><span class="swatch"><i></i><i></i><i></i></span><strong>${l}</strong><span class="small muted">${d}</span></button>`).join('')}</div>
+      ${CloudLink ? `<div class="label">Account</div>
+      ${CloudLink.user ? `<div class="sub-row"><span><strong>${esc(CloudLink.user.email || 'Signed in')}</strong><br><span class="small muted">${esc(CloudLink.status || 'Connecting…')}</span></span><button type="button" class="btn small-btn" data-a="cloud-out">Sign out</button></div>` : `<div><button type="button" class="btn small-btn primary" data-a="cloud-in">Sign in with Google</button></div><p class="small muted">Sign in to keep your teams in your account and use them on every device. Your work stays on this device until you do.</p>`}
+      ${CloudLink.problem ? `<p class="small bad-text" role="status">${esc(CloudLink.problem)}</p>` : ''}` : ''}
       <div class="label">Voice listens for</div>
       <div>${seg('voice-mode', Root.voiceMode || 'focused', [['focused', 'My roster'], ['any', 'Any words']])}</div>
       <p class="small muted">My roster is more accurate because it only listens for your players and ultimate words. If a name isn't being heard, it may be spelled in a way the recognizer doesn't know. Add a common spelling under that player's "Sounds like", or try Any words.</p>
@@ -825,7 +829,7 @@
     else view = rulesScreen();
     const tabs = [['game', 'Game'], ['roster', 'Teams'], ['players', 'Players'], ['time', 'Playtime'], ['rules', 'Rules']];
     root.innerHTML = `<div class="wrap">
-      <header class="bar"><h1 class="brand">Line Caller</h1><button type="button" class="team-now" data-a="tab" data-v="roster">${esc(S.team)}</button><nav class="tabs">${tabs.map(([k, l]) => `<button type="button" class="tab" data-a="tab" data-v="${k}" ${tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}<button type="button" class="tab" data-a="settings-open">Settings</button></nav></header>
+      <header class="bar"><h1 class="brand">Line Caller</h1><button type="button" class="team-now" data-a="tab" data-v="roster">${esc(S.team)}</button><nav class="tabs">${tabs.map(([k, l]) => `<button type="button" class="tab" data-a="tab" data-v="${k}" ${tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}${CloudLink && !CloudLink.user ? '<button type="button" class="tab" data-a="cloud-in">Sign in</button>' : ''}<button type="button" class="tab" data-a="settings-open">Settings</button></nav></header>
       ${S.isExample ? `<div class="banner"><span>You're looking at an example team. The players and ratings are made up.</span>${twoTap('clear', 'clear-example', 'Clear it and add my team', 'Tap again to clear')}</div>` : ''}
       ${view}</div>${editing ? editSheet() : ''}${sendFor ? sendSheet() : ''}${settingsOpen ? settingsSheet() : ''}${menuView()}`;
     if (active) { const el = document.getElementById(active); if (el) { el.focus(); if (caret !== null && caret !== undefined && el.setSelectionRange) try { el.setSelectionRange(caret, caret); } catch (e) { /* not a text field */ } } }
@@ -1126,6 +1130,8 @@
     'edit-done'() { stopVoice(); uiChange(() => { editIdx = null; voice = null; fixLine = false; sel = null; }); },
     'pt-view-all'() { stopVoice(); uiChange(() => { editIdx = null; voice = null; tab = 'time'; ptView = 'points'; pointsSource = 'current'; }); },
     'pt-time'(d) { commit(() => { const p = activePt(); p.endedAt = Math.max(p.startedAt + 1000, p.endedAt + Number(d.d) * 1000); }); },
+    'cloud-in'() { CloudLink.signIn(); },
+    'cloud-out'() { CloudLink.signOut(); },
     'settings-open'() { uiChange(() => { settingsOpen = true; }); },
     'settings-close'() { uiChange(() => { settingsOpen = false; }); },
     'set-scheme'(d) { commit(() => { Root.theme = d.v; }); },
@@ -1225,6 +1231,14 @@
       } catch (e) { uiChange(() => { reportNote = 'No email app opened. Set one up on this device, or save the report instead.'; }); }
     },
     async 'send-save'() {
+      if (!downloads) {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([Report.html(S)], { type: 'text/html' }));
+        link.download = `${S.team.replace(/[^A-Za-z0-9]+/g, '-')}-stats.html`;
+        link.click();
+        uiChange(() => { reportNote = 'Report saved. Attach it to an email to your subscribers.'; });
+        return;
+      }
       try { await downloads.save({ filename: `${S.team.replace(/[^A-Za-z0-9]+/g, '-')}-stats.html`, data: Report.html(S) }); uiChange(() => { reportNote = 'Report saved. Attach it to an email to your subscribers.'; }); } catch (e) { uiChange(() => { reportNote = 'The report was not saved. Try again if you still need it.'; }); }
     },
     'send-copy'() {
@@ -1439,6 +1453,80 @@
       if (name && !S.rules.positions.some((p) => p.name.toLowerCase() === name.toLowerCase())) commit(() => { const id = 'p' + uid(); S.rules.positions.push({ id, name, abbr: makeAbbr(name, id), skill: 'x_' + id, floor: 1, O: { min: 0 }, D: { min: 0 } }); redraft(); });
     }
   });
+
+  /* ---------- Accounts and sync (hosted site and Android app only) ---------- */
+  const CloudLink = (() => {
+    if (!window.firebase || !window.FIREBASE_CONFIG || typeof Cloud === 'undefined') return null;
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    const auth = firebase.auth(), fs = firebase.firestore();
+    fs.enablePersistence({ synchronizeTabs: true }).catch(() => { /* another tab holds it; sync still works */ });
+    const known = new Set();
+    let user = null, unsub = null, ready = false, timer = null, status = '', problem = '', plug = null;
+    const native = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    const nativeAuth = () => { if (!plug) plug = window.Capacitor.registerPlugin('FirebaseAuthentication'); return plug; };
+    const persist = () => { try { localStorage.setItem(KEY_STORE, JSON.stringify(Root)); } catch (e) { /* keep going */ } };
+    const col = () => fs.collection('users').doc(user.uid).collection('docs');
+    function refresh() { if (!dragging) { S = activeTeam(); touch(); render(); } }
+    function flush() {
+      if (!user || !ready) return;
+      const { writes, deletes } = Cloud.outgoing(Root, known, Date.now());
+      if (!writes.length && !deletes.length) return;
+      persist();
+      const ops = [...writes.map((w) => (b) => b.set(col().doc(w.id), w.data)), ...deletes.map((id) => (b) => b.delete(col().doc(id)))];
+      for (let i = 0; i < ops.length; i += 100) {
+        const batch = fs.batch();
+        ops.slice(i, i + 100).forEach((op) => op(batch));
+        batch.commit().catch((e) => { problem = `Sync failed: ${e.message}`; if (settingsOpen) render(); });
+      }
+    }
+    function listen() {
+      ready = false;
+      unsub = col().onSnapshot({ includeMetadataChanges: true }, (snap) => {
+        let changed = false;
+        snap.docChanges().forEach((c) => {
+          if (Cloud.incoming(Root, { type: c.type, id: c.doc.id, data: c.doc.data() }, known, (id) => { const t = blank(); t.id = id; return t; })) changed = true;
+        });
+        const wasReady = ready;
+        ready = true;
+        status = snap.metadata.hasPendingWrites ? 'Changes will upload when you are online.' : snap.metadata.fromCache ? 'Offline. Your work is saved on this device.' : 'Up to date.';
+        problem = '';
+        if (changed) {
+          const real = Root.teams.filter((t) => !t.isExample);
+          if (real.length) Root.teams = real;
+          if (!Root.teams.length) Root.teams = [example()];
+          if (!Root.teams.some((t) => t.id === Root.active)) Root.active = Root.teams[0].id;
+          persist();
+          refresh();
+        } else if (settingsOpen && !dragging) render();
+        if (!wasReady) flush();
+      }, (e) => { problem = `Sync stopped: ${e.message}`; if (!dragging) render(); });
+    }
+    auth.onAuthStateChanged((u) => {
+      if (unsub) { unsub(); unsub = null; }
+      known.clear(); ready = false; user = u; status = '';
+      if (u) listen();
+      if (S) render();
+    });
+    return {
+      get user() { return user; },
+      get status() { return status; },
+      get problem() { return problem; },
+      schedule() { clearTimeout(timer); timer = setTimeout(flush, 4000); },
+      async signIn() {
+        problem = '';
+        try {
+          if (native()) {
+            const r = await nativeAuth().signInWithGoogle();
+            await auth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential(r.credential.idToken));
+          } else await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
+        } catch (e) {
+          problem = native() ? `Google sign-in didn't finish. It needs Google Play on this device. (${e.message || e})` : `Sign-in didn't finish. (${e.message || e})`;
+          render();
+        }
+      },
+      async signOut() { if (native()) await nativeAuth().signOut().catch(() => {}); await auth.signOut(); },
+    };
+  })();
 
   const sharedCss = document.createElement('style');
   sharedCss.textContent = Report.CSS;

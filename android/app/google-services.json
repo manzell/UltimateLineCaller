@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "144572757116",
+    "project_id": "ultimate-line-caller",
+    "storage_bucket": "ultimate-line-caller.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:144572757116:android:29a4a2cbce74dab20cc5f9",
+        "android_client_info": {
+          "package_name": "app.linecaller.ultimate"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1V8Rm1MVssNvOgzdPXNoEqGBM6QZD5OU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

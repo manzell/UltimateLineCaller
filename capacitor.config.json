@@ -2,5 +2,16 @@
   "appId": "app.linecaller.ultimate",
   "appName": "Line Caller",
   "webDir": "www",
-  "android": { "backgroundColor": "#e9edf5", "adjustMarginsForEdgeToEdge": "auto" }
+  "android": {
+    "backgroundColor": "#e9edf5",
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": true,
+      "providers": [
+        "google.com"
+      ]
+    }
+  }
 }

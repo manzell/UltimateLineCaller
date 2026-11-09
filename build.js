@@ -26,7 +26,9 @@ fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
 fs.mkdirSync(path.join(__dirname, 'www'), { recursive: true });
 fs.writeFileSync(path.join(__dirname, 'dist/artifact.html'), body(''));
 // The Android page also needs Capacitor's bridge so it can reach the speech plugin.
-const bridge = `<script>${fs.readFileSync(path.join(__dirname, 'node_modules/@capacitor/core/dist/capacitor.js'), 'utf8')}</script>`;
+const nm = (f) => `<script>${fs.readFileSync(path.join(__dirname, 'node_modules', f), 'utf8')}</script>`;
+const bridge = nm('@capacitor/core/dist/capacitor.js') + nm('firebase/firebase-app-compat.js') + nm('firebase/firebase-auth-compat.js') + nm('firebase/firebase-firestore-compat.js')
+  + `<script>${read('firebase-config.js')}</script><script>${read('cloud.js').replace("if (typeof module !== 'undefined') module.exports = Cloud;", '')}</script>`;
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0);padding-bottom:env(safe-area-inset-bottom,0)}body{margin:0;font-size:14px}img{max-width:100%}[hidden]{display:none!important}</style></head><body>${body(bridge)}</body></html>`;
 fs.writeFileSync(path.join(__dirname, 'www/index.html'), page);
 console.log('built', (page.length / 1024).toFixed(0) + ' KB');
