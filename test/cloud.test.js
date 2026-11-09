@@ -20,7 +20,7 @@ function device(root) {
     },
     pull() {
       let changed = false;
-      store.forEach((data, id) => { if (Cloud.incoming(root, { type: 'modified', id, data: clone(data) }, known, blank)) changed = true; });
+      Cloud.inOrder([...store].map(([id, data]) => ({ type: 'modified', id, data: clone(data) }))).forEach((c) => { if (Cloud.incoming(root, c, known, blank)) changed = true; });
       [...known].filter((id) => !store.has(id)).forEach((id) => { if (Cloud.incoming(root, { type: 'removed', id }, known, blank)) changed = true; });
       return changed;
     },
@@ -30,7 +30,7 @@ function device(root) {
 const desk = device({ teams: [team('t1', 'Flyers'), { ...team('ex', 'Example'), isExample: true }] });
 const phone = device({ teams: [] });
 
-check(desk.push() === 2, 'first upload is team and game records');
+check(desk.push() === 1, 'first upload is the team record');
 check(![...store.keys()].some((k) => k.includes('ex')), 'example team is never uploaded');
 check(desk.push() === 0, 'nothing to upload when nothing changed');
 
@@ -47,10 +47,25 @@ phone.root.teams[0].game = { id: 'g1', points: [{ result: 'us' }] };
 desk.root.teams[0].players.push({ id: 'b', name: 'Bea', contacts: [] });
 desk.push(); phone.push();
 desk.pull(); phone.pull();
-check(desk.root.teams[0].game && desk.root.teams[0].game.id === 'g1', 'desktop sees the phone game');
+check(desk.root.teams[0].game && desk.root.teams[0].game.id === 'g1' && desk.root.teams[0].game.draft, 'desktop sees the phone game');
 check(phone.root.teams[0].players.length === 2, 'phone sees the desktop roster');
 check(phone.root.teams[0].game.points.length === 1, 'roster edit did not clobber the game');
 check(desk.push() === 0 && phone.push() === 0, 'settled after exchange');
+
+// One coach logs the running point while another builds the next line.
+{
+  const a = phone.root.teams[0], b = desk.root.teams[0];
+  a.game = { id: 'g2', points: [], live: { events: [] }, draft: { alt: 0, on: null, ratio: null, line: {}, plan: null } };
+  phone.push(); desk.pull();
+  check(b.game.live && b.game.draft, 'running point and line arrive');
+  a.game.live.events.push({ t: 'touch', id: 'a' });
+  b.game.draft.line = { a: 'H' };
+  phone.push(); desk.push();
+  phone.pull(); desk.pull();
+  check(a.game.draft.line.a === 'H' && b.game.live.events.length === 1, 'logger and line caller both keep their work');
+  check(desk.push() === 0 && phone.push() === 0, 'settled after split edits');
+  a.game = { id: 'g1', points: [{ result: 'us' }] }; phone.push(); desk.pull();
+}
 
 // Newest wins on the same record.
 desk.root.teams[0].team = 'Older name'; desk.push();

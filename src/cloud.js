@@ -3,17 +3,31 @@
    Editing the roster on a desktop therefore can't overwrite a game being recorded on a phone. */
 const Cloud = (() => {
   const hash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return h >>> 0; };
-  const LOCAL_ONLY = ['game', 'history', 'setup', 'syncAt', 'syncHash', 'isExample', 'lastFinal'];
+  const LOCAL_ONLY = ['game', 'history', 'setup', 'syncAt', 'syncHash', 'isExample', 'lastFinal', 'access'];
   function infoOf(team) {
     const out = {};
     Object.keys(team).filter((k) => !LOCAL_ONLY.includes(k)).sort().forEach((k) => { out[k] = team[k]; });
     return out;
   }
-  const canonical = (team, kind, key) => JSON.stringify(kind === 'team' ? infoOf(team) : kind === 'game' ? (team.game || null) : team.history.find((h) => h.id === key));
+  const BLANK_DRAFT = () => ({ alt: 0, on: null, ratio: null, line: {}, plan: null });
+  // The running point and the next line are separate records, so one coach can log while another calls lines.
+  function gameOf(team) {
+    if (!team.game) return null;
+    const out = {};
+    Object.keys(team.game).filter((k) => k !== 'live' && k !== 'draft').sort().forEach((k) => { out[k] = team.game[k]; });
+    return out;
+  }
+  const canonical = (team, kind, key) => JSON.stringify(
+    kind === 'team' ? infoOf(team) : kind === 'game' ? gameOf(team)
+      : kind === 'live' ? (team.game ? team.game.live || null : null)
+        : kind === 'draft' ? (team.game ? team.game.draft || null : null)
+          : team.history.find((h) => h.id === key));
   function partsOf(team) {
     return [
       { id: `t_${team.id}`, kind: 'team', teamId: team.id, key: null },
       { id: `g_${team.id}`, kind: 'game', teamId: team.id, key: null },
+      { id: `l_${team.id}`, kind: 'live', teamId: team.id, key: null },
+      { id: `d_${team.id}`, kind: 'draft', teamId: team.id, key: null },
       ...team.history.map((h) => ({ id: `h_${team.id}_${h.id}`, kind: 'hist', teamId: team.id, key: h.id })),
     ];
   }
@@ -29,6 +43,7 @@ const Cloud = (() => {
         current.add(part.id);
         const json = canonical(team, part.kind, part.key), h = hash(json);
         if (team.syncHash[part.id] === h) continue;
+        if (team.syncHash[part.id] === undefined && json === 'null') continue;
         team.syncHash[part.id] = h;
         team.syncAt[part.id] = now;
         writes.push({ id: part.id, data: { kind: part.kind, teamId: part.teamId, key: part.key, json, at: now } });
@@ -66,8 +81,13 @@ const Cloud = (() => {
     if ((team.syncAt[id] || 0) >= data.at) return false;
     const value = JSON.parse(data.json);
     if (data.kind === 'team') Object.assign(team, value);
-    else if (data.kind === 'game') team.game = value;
-    else {
+    else if (data.kind === 'game') {
+      const old = team.game && value && team.game.id === value.id ? team.game : null;
+      team.game = value ? { ...value, live: old ? old.live : value.live || null, draft: (old && old.draft) || value.draft || BLANK_DRAFT() } : null;
+      // A locally filled-in blank line is not an edit, so it shouldn't be uploaded.
+      if (team.game) team.syncHash[`d_${team.id}`] = team.syncHash[`d_${team.id}`] || hash(canonical(team, 'draft', null));
+    } else if (data.kind === 'live') { if (team.game) team.game.live = value; } else if (data.kind === 'draft') { if (team.game && value) team.game.draft = value; }
+    else if (data.kind === 'hist') {
       team.history = team.history.filter((h) => h.id !== data.key).concat(value).sort((a, b) => a.date - b.date);
     }
     team.isExample = false;
@@ -76,6 +96,9 @@ const Cloud = (() => {
     return true;
   }
 
-  return { outgoing, incoming, hash };
+  // A game must exist before its point and line can land on it.
+  const RANK = { team: 0, game: 1, hist: 2, live: 3, draft: 4 };
+  const inOrder = (changes) => changes.slice().sort((a, b) => ((a.data && RANK[a.data.kind]) || 0) - ((b.data && RANK[b.data.kind]) || 0));
+  return { outgoing, incoming, hash, inOrder };
 })();
 if (typeof module !== 'undefined') module.exports = Cloud;

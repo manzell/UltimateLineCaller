@@ -4,7 +4,8 @@ const Report = (() => {
   const esc = (s) => String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const clock = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
   const STAT_LABEL = { goal: 'Goal', assist: 'Assist', turn: 'Turnover', block: 'Block', oppturn: 'Opponent turnover', oppgoal: 'Opponent goal' };
-  const blank = () => ({ played: 0, O: 0, D: 0, touch: 0, goal: 0, assist: 0, turn: 0, block: 0 });
+  const blank = () => ({ played: 0, O: 0, D: 0, touch: 0, goal: 0, assist: 0, turn: 0, drop: 0, block: 0 });
+  const label = (e) => (e.t === 'turn' ? (e.sub === 'drop' ? 'Drop' : e.sub === 'throw' ? 'Throwaway' : 'Turnover') : e.t === 'block' && e.sub === 'int' ? 'Interception' : STAT_LABEL[e.t]);
   const onField = (pt) => [...new Set(pt.lineup.concat((pt.subs || []).map((s) => s.in)))];
 
   function totals(points) {
@@ -12,7 +13,7 @@ const Report = (() => {
     const get = (id) => { if (!out.has(id)) out.set(id, blank()); return out.get(id); };
     for (const pt of points) {
       onField(pt).forEach((id) => { const t = get(id); t.played += 1; t[pt.on] += 1; });
-      (pt.events || []).forEach((e) => { if (!e.id) return; const t = get(e.id); if (t[e.t] !== undefined) t[e.t] += 1; });
+      (pt.events || []).forEach((e) => { if (!e.id) return; const t = get(e.id); if (t[e.t] !== undefined) t[e.t] += 1; if (e.t === 'turn' && e.sub === 'drop') t.drop += 1; });
     }
     return out;
   }
@@ -76,6 +77,8 @@ const Report = (() => {
   function narrative(events) {
     const items = [];
     (events || []).forEach((e, i) => {
+      const prev = items[items.length - 1];
+      if (e.t === 'touch' && prev && prev.t === 'block' && prev.sub === 'int' && prev.id === e.id && prev.idxs.length === 1) { prev.idxs.push(i); return; }
       if (e.t === 'assist' || e.t === 'goal') {
         for (let j = items.length - 1; j >= 0; j--) {
           const it = items[j];
@@ -83,9 +86,43 @@ const Report = (() => {
           if (it.t !== 'touch') break;
         }
       }
-      items.push({ t: e.t, id: e.id, unsure: e.unsure, idxs: [i] });
+      items.push({ t: e.t, id: e.id, sub: e.sub, unsure: e.unsure, idxs: [i] });
     });
     return items;
+  }
+
+  // Who had the disc through a point. Timing comes from when each event was entered.
+  function possession(pt) {
+    const dur = Math.max(1, pt.endedAt - pt.startedAt);
+    const flips = [];
+    let side = pt.on === 'O' ? 'us' : 'them', catches = 0, last = null;
+    for (const e of pt.events || []) {
+      if (e.t === 'touch') { if (last && last !== e.id) catches++; last = e.id; continue; }
+      if (e.t === 'assist') continue;
+      last = null;
+      if (e.t === 'turn') { flips.push({ e, from: side, to: 'them', mark: 'T' }); side = 'them'; }
+      else if (e.t === 'block') { flips.push({ e, from: side, to: 'us', mark: e.sub === 'int' ? 'I' : 'B' }); side = 'us'; }
+      else if (e.t === 'oppturn') { flips.push({ e, from: side, to: 'us', mark: 'T' }); side = 'us'; }
+    }
+    // Entries added or reordered later have no useful time; those get spaced between their neighbors.
+    let floor = 0;
+    const raw = flips.map((f) => { const v = (f.e.at - pt.startedAt) / dur; if (Number.isFinite(v) && v > floor && v < 1) { floor = v; return v; } return null; });
+    for (let i = 0; i < raw.length; i++) {
+      if (raw[i] !== null) continue;
+      let j = i; while (j < raw.length && raw[j] === null) j++;
+      const lo = i ? raw[i - 1] : 0, hi = j < raw.length ? raw[j] : 1;
+      for (let k = i; k < j; k++) raw[k] = lo + ((hi - lo) * (k - i + 1)) / (j - i + 1);
+    }
+    const marks = flips.map((f, i) => ({ pos: raw[i], label: f.mark, side: f.from, title: label(f.e) }));
+    const segments = [];
+    let at = 0, cur = pt.on === 'O' ? 'us' : 'them';
+    flips.forEach((f, i) => { segments.push({ from: at, to: raw[i], side: cur }); at = raw[i]; cur = f.to; });
+    segments.push({ from: at, to: 1, side: cur });
+    return { segments, marks, catches };
+  }
+  function possessionBar(pt) {
+    const p = possession(pt), pct = (x) => (x * 100).toFixed(1);
+    return `<div class="pb" role="img" aria-label="Disc possession through the point"><div class="pb-bar">${p.segments.map((s) => `<i class="${s.side}" style="left:${pct(s.from)}%;width:${pct(s.to - s.from)}%"></i>`).join('')}</div>${p.marks.map((m) => `<b class="${m.side}" style="left:${pct(m.pos)}%" title="${esc(m.title)}">${m.label}</b>`).join('')}</div>`;
   }
 
   function subsetsOf(ids, size, emit) {
@@ -131,16 +168,17 @@ const Report = (() => {
       <p class="ln-note">Each filled box is the team that scored that point, with the running score. A heavy outline marks the team on offense. A red outline is a break: the team on defense scored.</p>`;
   }
 
-  const COLS = [['touch', 'Touches'], ['goal', 'Goals'], ['assist', 'Assists'], ['turn', 'Turns'], ['block', 'Blocks']];
+  const COLS = [['touch', 'Touches'], ['goal', 'Goals'], ['assist', 'Assists'], ['throw', 'Throwaways'], ['drop', 'Drops'], ['block', 'Blocks']];
+  const statVal = (t, k) => (k === 'throw' ? (t.turn || 0) - (t.drop || 0) : t[k] || 0);
   const jerseyNum = (p) => { const n = parseInt(p.no, 10); return Number.isNaN(n) ? 9999 : n; };
   function statTable(players, map, extra) {
-    const active = (t) => t.played > 0 || COLS.some(([k]) => t[k] > 0);
+    const active = (t) => t.played > 0 || COLS.some(([k]) => statVal(t, k) > 0);
     const rows = players.filter((p) => map.has(p.id) && active(map.get(p.id))).sort((a, b) => map.get(b.id).played - map.get(a.id).played || jerseyNum(a) - jerseyNum(b));
-    const sum = blank();
-    rows.forEach((p) => COLS.forEach(([k]) => { sum[k] += map.get(p.id)[k]; }));
+    const sum = {};
+    COLS.forEach(([k]) => { sum[k] = rows.reduce((a, p) => a + statVal(map.get(p.id), k), 0); });
     const points = (t) => `${t.played} (${t.O}/${t.D})`;
     return `<div class="tbl-wrap"><table class="bx bx-box"><thead><tr><th class="bx-no">#</th><th class="bx-name">Player</th>${extra ? `<th>${esc(extra.label)}</th>` : ''}<th title="Total points (offense/defense)">Points</th>${COLS.map(([, l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
-      ${rows.map((p) => `<tr><td class="bx-no">${esc(p.no)}</td><td class="bx-name">${esc(p.name)}</td>${extra ? `<td>${extra.value(p)}</td>` : ''}<td>${points(map.get(p.id))}</td>${COLS.map(([k]) => `<td>${map.get(p.id)[k]}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${COLS.length + 3}">No stats yet.</td></tr>`}
+      ${rows.map((p) => `<tr><td class="bx-no">${esc(p.no)}</td><td class="bx-name">${esc(p.name)}</td>${extra ? `<td>${extra.value(p)}</td>` : ''}<td>${points(map.get(p.id))}</td>${COLS.map(([k]) => `<td>${statVal(map.get(p.id), k)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${COLS.length + 3}">No stats yet.</td></tr>`}
       </tbody>${rows.length && !extra ? `<tfoot><tr><td></td><td class="bx-name">Team</td><td></td>${COLS.map(([k]) => `<td>${sum[k]}</td>`).join('')}</tr></tfoot>` : ''}</table></div>`;
   }
   const boxTable = (points, players) => statTable(players, totals(points));
@@ -153,8 +191,8 @@ const Report = (() => {
     return points.map((p, i) => {
       p.result === 'us' ? us++ : them++;
       const line = p.lineup.filter((id) => byId.has(id)).map((id) => `${name(id)}${abbr((p.roles || {})[id]) ? ` <small>${esc(abbr(p.roles[id]))}</small>` : ''}`).join(', ');
-      const events = narrative(p.events).map((it) => (it.t === 'touch' && !it.role ? name(it.id) : !it.id ? `<b class="e-${it.t}">${STAT_LABEL[it.t]}</b>` : `<b class="e-${it.role || it.t}">${STAT_LABEL[it.role || it.t]}: ${name(it.id)}</b>`)).join(' → ');
-      return `<div class="rp-pt"><p><strong>Point ${i + 1}</strong> · ${p.on === 'O' ? 'Offense' : 'Defense'} · ${p.result === 'us' ? 'We scored' : 'They scored'} · ${us}–${them} · ${clock(p.endedAt - p.startedAt)}</p><p>${line}</p>${events ? `<p class="rp-chain">${events}</p>` : ''}</div>`;
+      const events = narrative(p.events).map((it) => (it.t === 'touch' && !it.role ? name(it.id) : !it.id ? `<b class="e-${it.t}">${STAT_LABEL[it.t]}</b>` : `<b class="e-${it.role || it.t}">${label({ t: it.role || it.t, sub: it.sub })}: ${name(it.id)}</b>`)).join(' → ');
+      return `<div class="rp-pt"><p><strong>Point ${i + 1}</strong> · ${p.on === 'O' ? 'Offense' : 'Defense'} · ${p.result === 'us' ? 'We scored' : 'They scored'} · ${us}–${them} · ${clock(p.endedAt - p.startedAt)}</p>${possessionBar(p)}<p>${line}</p>${events ? `<p class="rp-chain">${events}</p>` : ''}</div>`;
     }).reverse().join('');
   }
 
@@ -176,7 +214,7 @@ const Report = (() => {
 .bx .bx-no { color: var(--muted); width: 2.5em; }
 .bx-box { width: auto; }
 .bx-box th, .bx-box td { padding: 3px 4px; }
-.bx-box th:not(.bx-name):not(.bx-no), .bx-box td:not(.bx-name):not(.bx-no) { width: 66px; min-width: 66px; max-width: 66px; text-align: center; }
+.bx-box th:not(.bx-name):not(.bx-no), .bx-box td:not(.bx-name):not(.bx-no) { width: 76px; min-width: 76px; max-width: 76px; text-align: center; }
 .bx-box .bx-name { min-width: 120px; padding-right: 14px; }
 .bx tfoot td { font-weight: 700; border-top: 2px solid var(--ink); }
 .rp-chain b { padding: 0 5px; border-radius: 3px; color: #ffffff; font-weight: 700; }
@@ -191,6 +229,12 @@ const Report = (() => {
 .rp-pt { padding: 8px 0; border-top: 1px solid var(--line); }
 .rp-pt small { color: var(--muted); }
 .rp-chain { color: var(--muted); font-size: .9375rem; }
+.pb { position: relative; height: 34px; min-width: 120px; }
+.pb-bar { position: absolute; left: 0; right: 0; top: 0; height: 14px; border-radius: 7px; overflow: hidden; }
+.pb-bar i { position: absolute; top: 0; bottom: 0; }
+.pb-bar i.us { background: #1f7a9c; } .pb-bar i.them { background: #c8651b; }
+.pb b { position: absolute; top: 15px; width: 18px; height: 18px; margin-left: -9px; border-radius: 50%; color: #ffffff; font: 700 11px/18px system-ui, sans-serif; text-align: center; }
+.pb b.us { background: #1f7a9c; } .pb b.them { background: #c8651b; }
 .rp-wrap { max-width: 920px; margin: 0 auto; padding: 16px; }
 .rp-up { padding: 6px 0; border-top: 1px solid var(--line); }`;
 
@@ -202,8 +246,8 @@ const Report = (() => {
     const positions = team.rules.positions.map((p) => ({ id: p.id, abbr: p.abbr }));
     const games = team.history.slice().reverse().map((h) => ({
       id: h.id, opponent: h.opponent, date: h.date, us: h.us, them: h.them,
-      totals: Object.fromEntries(Object.entries(h.perPlayer).map(([id, v]) => [id, { played: v.played || 0, O: v.O || 0, D: v.D || 0, touch: v.touch || 0, goal: v.goal || 0, assist: v.assist || 0, turn: v.turn || 0, block: v.block || 0 }])),
-      points: (h.points || []).map((p) => ({ lineup: p.lineup, roles: p.roles, on: p.on, result: p.result, startedAt: p.startedAt, endedAt: p.endedAt, subs: (p.subs || []).map((s) => ({ in: s.in, out: s.out })), events: (p.events || []).map((e) => ({ t: e.t, id: e.id })) })),
+      totals: Object.fromEntries(Object.entries(h.perPlayer).map(([id, v]) => [id, { played: v.played || 0, O: v.O || 0, D: v.D || 0, touch: v.touch || 0, goal: v.goal || 0, assist: v.assist || 0, turn: v.turn || 0, drop: v.drop || 0, block: v.block || 0 }])),
+      points: (h.points || []).map((p) => ({ lineup: p.lineup, roles: p.roles, on: p.on, result: p.result, startedAt: p.startedAt, endedAt: p.endedAt, subs: (p.subs || []).map((s) => ({ in: s.in, out: s.out })), events: (p.events || []).map((e) => ({ t: e.t, id: e.id, sub: e.sub, at: e.at })) })),
     }));
     const upcoming = (team.schedule || []).filter((x) => !x.gameId).map((x) => ({ date: x.date, time: x.time, opponent: x.opponent, location: x.location }));
     return { team: team.team, players, positions, games, upcoming };
@@ -233,6 +277,6 @@ const Report = (() => {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(team.team)} stats</title><style>${CSS}body{margin:0}</style></head><body class="rp">${fragment(team)}</body></html>`;
   }
 
-  return { CSS, narrative, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
+  return { CSS, label, possession, possessionBar, narrative, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
 })();
 if (typeof module !== 'undefined') module.exports = Report;

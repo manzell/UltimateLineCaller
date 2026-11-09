@@ -66,6 +66,22 @@ check(box.includes('3 (1/2)'), 'points shown as total (O/D)');
   check(opp.length === 2 && opp[1].t === 'oppgoal', 'opponent goal is its own item');
 }
 
+// Disc possession through a point.
+{
+  const base = { startedAt: 0, endedAt: 1000, lineup: ['a'], on: 'D', result: 'us' };
+  const p = Report.possession({ ...base, events: [{ t: 'block', id: 'a', at: 200 }, { t: 'touch', id: 'a', at: 250 }, { t: 'touch', id: 'b', at: 300 }, { t: 'turn', sub: 'throw', id: 'b', at: 500 }, { t: 'oppturn', at: 800 }, { t: 'touch', id: 'c', at: 900 }] });
+  check(p.segments.map((s) => s.side).join() === 'them,us,them,us', 'possession sides: ' + p.segments.map((s) => s.side));
+  check(p.segments[1].from === 0.2 && p.segments[1].to === 0.5, 'times come from entry');
+  check(p.marks.map((m) => m.label).join() === 'B,T,T', 'marks');
+  check(p.catches === 1, 'catches');
+  const late = Report.possession({ ...base, on: 'O', events: [{ t: 'turn', id: 'a', at: 5000 }, { t: 'block', id: 'a', at: 5000 }] });
+  check(late.marks[0].pos < late.marks[1].pos && late.marks[1].pos < 1 && late.marks[0].pos > 0, 'entries without a usable time are spaced out');
+  const int = Report.narrative([{ t: 'block', sub: 'int', id: 'a' }, touch('a'), touch('b')]);
+  check(int.length === 2 && Report.label(int[0]) === 'Interception', 'interception shown once');
+  const t2 = Report.totals([pt(['a'], 'O', 'us', [{ t: 'turn', sub: 'drop', id: 'a' }, { t: 'turn', sub: 'throw', id: 'a' }])]).get('a');
+  check(t2.turn === 2 && t2.drop === 1, 'drop and throwaway counted');
+}
+
 // A player's own record.
 {
   const s = Report.playerSummary(points, 'a');

@@ -410,3 +410,27 @@ summary { cursor: pointer; min-height: 40px; display: flex; align-items: center;
   .pc .tile { width: 36px; height: 36px; font-size: 1.0625rem; }
   .pc .nm { font-size: 1.125rem; }
 }
+
+/* Point summaries with possession bars */
+.pg { display: grid; grid-template-columns: 26px 62px minmax(120px, 1.1fr) 34px minmax(160px, 2fr) 62px minmax(150px, 1.4fr) 62px; gap: 6px 12px; align-items: center; }
+.pg-head { font-size: var(--t-s); font-weight: 700; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.pg-no { font: 700 var(--t-l)/1 var(--display); }
+.pg-score { text-align: center; padding: 3px 6px; border-radius: 999px; font: 700 var(--t-m)/1.2 var(--display); background: var(--panel-2); white-space: nowrap; }
+.pg-score.us { background: var(--us-tint); color: var(--accent); }
+.pg-by { display: flex; flex-direction: column; min-width: 0; }
+.pg-start { font: 700 var(--t-m)/1 var(--display); text-align: center; }
+.pg-len { display: flex; flex-direction: column; align-items: flex-end; }
+.pg-notes { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pg-edit { margin-left: auto; }
+.pg-key { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pg-key i { display: inline-block; width: 16px; height: 10px; border-radius: 3px; }
+.pg-key i.us { background: #1f7a9c; } .pg-key i.them { background: #c8651b; }
+.pp { border-top: 1px solid var(--line); }
+@media (max-width: 760px) {
+  .pg { grid-template-columns: 24px 56px minmax(0, 1fr) 26px; }
+  .pg-head { display: none; }
+  .pg .pb { grid-column: 1 / -1; }
+  .pg-len { align-items: flex-start; flex-direction: row; gap: 8px; grid-column: 1 / 3; }
+  .pg-notes { grid-column: 3 / -1; }
+  .pg-edit { grid-column: 1 / -1; justify-self: end; }
+}

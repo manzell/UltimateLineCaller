@@ -86,7 +86,7 @@ const Engine = (() => {
     return Math.max(0, ms);
   }
 
-  const emptyStats = (id) => ({ id, played: 0, O: 0, D: 0, ms: 0, target: 0, energy: 100, streak: 0, touch: 0, goal: 0, assist: 0, turn: 0, block: 0 });
+  const emptyStats = (id) => ({ id, played: 0, O: 0, D: 0, ms: 0, target: 0, energy: 100, streak: 0, touch: 0, goal: 0, assist: 0, turn: 0, drop: 0, block: 0 });
 
   // Replays the log into per-player totals: points, minutes, target, energy, streak, touches.
   function replay(game, players, rules, extraPoints) {
@@ -122,7 +122,7 @@ const Engine = (() => {
         }
         s.energy = clamp(s.energy, 5, 100);
       }
-      for (const ev of pt.events || []) { const s = stats.get(ev.id); if (s && s[ev.t] !== undefined) s[ev.t] += 1; }
+      for (const ev of pt.events || []) { const s = stats.get(ev.id); if (s && s[ev.t] !== undefined) s[ev.t] += 1; if (s && ev.t === 'turn' && ev.sub === 'drop') s.drop += 1; }
       prevEnd = pt.endedAt;
     }
     return stats;
@@ -156,7 +156,11 @@ const Engine = (() => {
       const b = a === 'W' ? 'M' : 'W';
       ratio = rules.ratioMode === 'abba' && ((n + 1) >> 1) % 2 === 1 ? b : a;
     }
-    return { on, ratio, halftime, pointNo: n + 1, minLeft: Math.max(1, rules.gameTo - Math.max(us, them)) };
+    // Gendzone: the team starting in that endzone picks the ratio, and teams change ends every point.
+    let caller = null;
+    if (rules.division === 'mixed' && rules.ratioMode === 'gendzone') caller = (rules.gendzoneUs !== false) === (n % 2 === 0) ? 'us' : 'them';
+    if (rules.division === 'mixed' && rules.ratioMode === 'call') caller = on === 'O' ? 'us' : 'them';
+    return { on, ratio, caller, halftime, pointNo: n + 1, minLeft: Math.max(1, rules.gameTo - Math.max(us, them)) };
   }
 
   // Position minimums for a line of n players. Minimums that cannot all fit are reduced.
@@ -554,7 +558,9 @@ const Engine = (() => {
       events.push({ t: 'goal', id: ev.id, at });
       return;
     }
-    events.push({ t: ev.t, id: ev.id, at });
+    events.push({ t: ev.t, id: ev.id, at, ...(ev.sub ? { sub: ev.sub } : {}) });
+    // An interception puts the disc straight in the defender's hands.
+    if (ev.t === 'block' && ev.sub === 'int') events.push({ t: 'touch', id: ev.id, at });
   }
 
   // Rebuilds what the app filled in by itself after the coach reorders a point.
@@ -600,7 +606,8 @@ const Engine = (() => {
   for (const w of 'turnover turnovers turn stall stalled fumble fumbled'.split(' ')) KW.set(w, 'turn');
   KW.set('oppturn', 'oppturn');
   for (const w of 'drop drops dropped bobbled missed'.split(' ')) KW.set(w, 'drop');
-  for (const w of 'block blocks blocked d takeaway interception intercepted intercepts swat swats swatted'.split(' ')) KW.set(w, 'block');
+  for (const w of 'block blocks blocked d dee ds takeaway swat swats swatted'.split(' ')) KW.set(w, 'block');
+  for (const w of 'interception interceptions intercept intercepted intercepts'.split(' ')) KW.set(w, 'int');
   for (const w of 'assist assists assisted'.split(' ')) KW.set(w, 'assist');
 
   // Common short forms. A shared start ("Jim" and "Jimmy") is handled separately.
@@ -691,6 +698,7 @@ const Engine = (() => {
       .replace(/ (turned|turns|turn) it over /g, ' turn ')
       .replace(/ for the point /g, ' goal ')
       .replace(/ knocked (it )?down /g, ' block ')
+      .replace(/ picked (it )?off /g, ' intercepted ')
       .replace(/ (throw|threw|throws|thrown)( it)? away /g, ' throwaway ')
       .replace(/ (throw|threw|throws)( it)? out /g, ' throwaway ')
       .replace(/ out of bounds /g, ' throwaway ')
@@ -737,7 +745,7 @@ const Engine = (() => {
     for (let i = 0; i < seq.length; i++) {
       const it = seq[i], nx = seq[i + 1];
       if (it.k === 'p') {
-        if (nx && nx.k === 'block' && !(seq[i + 2] && seq[i + 2].k === 'p' && seq[i + 2].by)) { events.push({ t: 'block', id: it.id, unsure: it.unsure }); i++; continue; }
+        if (nx && (nx.k === 'block' || nx.k === 'int') && !(seq[i + 2] && seq[i + 2].k === 'p' && seq[i + 2].by)) { events.push({ t: 'block', id: it.id, unsure: it.unsure, ...(nx.k === 'int' ? { sub: 'int' } : {}) }); i++; continue; }
         if (nx && nx.k === 'assist') { events.push({ t: 'assist', id: it.id, unsure: it.unsure }); i++; continue; }
         touch(it);
       } else if (it.k === 'goal') {
@@ -760,9 +768,9 @@ const Engine = (() => {
         const li = lastTouchIdx();
         if (li < 0) continue;
         const holder = events[li];
-        if (it.k === 'drop') { events.splice(li, 1); events.push({ t: 'turn', id: holder.id, unsure: holder.unsure, drop: true }); } else if (it.k === 'throwaway' && holder.via && li > 0 && events[li - 1].t === 'touch') { events.splice(li, 1); events.push({ t: 'turn', id: events[li - 1].id, unsure: events[li - 1].unsure }); } else events.push({ t: 'turn', id: holder.id, unsure: holder.unsure });
-      } else if (it.k === 'block') {
-        if (nx && nx.k === 'p') { events.push({ t: 'block', id: nx.id, unsure: nx.unsure }); i++; }
+        if (it.k === 'drop') { events.splice(li, 1); events.push({ t: 'turn', sub: 'drop', id: holder.id, unsure: holder.unsure }); } else if (it.k === 'throwaway' && holder.via && li > 0 && events[li - 1].t === 'touch') { events.splice(li, 1); events.push({ t: 'turn', sub: 'throw', id: events[li - 1].id, unsure: events[li - 1].unsure }); } else events.push({ t: 'turn', id: holder.id, unsure: holder.unsure, ...(it.k === 'throwaway' ? { sub: 'throw' } : {}) });
+      } else if (it.k === 'block' || it.k === 'int') {
+        if (nx && nx.k === 'p') { events.push({ t: 'block', id: nx.id, unsure: nx.unsure, ...(it.k === 'int' ? { sub: 'int' } : {}) }); i++; }
       } else if (it.k === 'assist') {
         if (nx && nx.k === 'p') { events.push({ t: 'assist', id: nx.id, unsure: nx.unsure }); i++; }
       } else if (it.k === 'oppturn') events.push({ t: 'oppturn' });

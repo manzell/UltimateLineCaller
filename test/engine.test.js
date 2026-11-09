@@ -378,6 +378,32 @@ for (const [n, mixed, mode] of [[12, false, 'balanced'], [14, false, 'develop'],
   check(again.filter((e) => e.t === 'assist').map((e) => e.id).join() === 'z', 'assist follows the new order: ' + JSON.stringify(again.map((e) => e.t + ':' + e.id)));
 }
 
+// Turnover types, interceptions and the D synonym.
+{
+  const crew = ['Jimmy', 'Mickey', 'Robin', 'Dee'].map((name, i) => ({ id: 'c' + i, name, no: '', aliases: '' }));
+  const say = (s) => E.parsePlay(s, crew).events;
+  check(say('Jimmy dropped it')[0].sub === 'drop', 'drop type');
+  check(say('Mickey threw it away').find((e) => e.t === 'turn').sub === 'throw', 'throwaway type');
+  check(say('Robin got a D')[0].t === 'block' && !say('Robin got a D')[0].sub, 'D means block');
+  check(say('D by Jimmy')[0].id === 'c0', 'D by name');
+  check(say('Dee to Jimmy')[0].id === 'c3', 'a player named Dee is still a player');
+  const pick = say('Robin interception');
+  check(pick[0].t === 'block' && pick[0].sub === 'int', 'interception type');
+  check(say('intercepted by Mickey')[0].sub === 'int', 'intercepted by');
+  const ev = [];
+  E.addEvent(ev, { t: 'block', sub: 'int', id: 'c2' }, 1); E.addEvent(ev, { t: 'touch', id: 'c0' }, 2); E.addEvent(ev, { t: 'goal', id: 'c0' }, 3);
+  check(ev.map((x) => x.t).join() === 'block,touch,touch,assist,goal', 'interceptor has the disc: ' + ev.map((x) => x.t));
+  check(ev.find((x) => x.t === 'assist').id === 'c2', 'interceptor can get the assist');
+  const r = E.defaultRules(); r.division = 'mixed';
+  const g = { startOn: 'O', points: [] };
+  r.ratioMode = 'gendzone';
+  check(E.context(g, r).caller === 'us', 'gendzone: we start with the call');
+  check(E.context({ startOn: 'O', points: [{ result: 'them' }] }, r).caller === 'them', 'gendzone alternates each point');
+  r.ratioMode = 'call';
+  check(E.context(g, r).caller === 'us', 'offense calls: on O we call');
+  check(E.context({ startOn: 'O', points: [{ result: 'us' }] }, r).caller === 'them', 'offense calls: on D they call');
+}
+
 // A name that only fits a bench player is matched to the bench.
 {
   const field = ['Jimmy', 'Mickey'].map((name, i) => ({ id: 'f' + i, name, no: '', aliases: '' }));

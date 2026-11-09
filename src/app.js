@@ -10,13 +10,14 @@
   const MATCH = { W: 'women-matching', M: 'men-matching' };
   const TARGET_LABEL = { least: 'Least', less: 'Less', average: 'Average', more: 'More', most: 'Most' };
   const STAT_LABEL = { goal: 'Goal', assist: 'Assist', turn: 'Turnover', block: 'Block' };
+  const STAT_MENU = [['goal', '', 'Goal'], ['assist', '', 'Assist'], ['turn', 'throw', 'Throwaway'], ['turn', 'drop', 'Drop'], ['block', '', 'Block (D)'], ['block', 'int', 'Interception']];
   const MODE_LABEL = { develop: 'Develop', balanced: 'Balanced', competitive: 'Competitive', win: 'Universe' };
   const SCHEMES = [['system', 'Automatic', 'Follows your device'], ['light', 'Light', 'Bright and plain'], ['dark', 'Dark', 'Easy at dusk'], ['field', 'Field', 'Deep turf green'], ['ocean', 'Ocean', 'Cool blues'], ['sunrise', 'Sunrise', 'Warm and soft'], ['sun', 'High sun', 'Maximum contrast outdoors']];
   const newDraft = (plan) => ({ alt: 0, on: null, ratio: null, line: {}, plan: plan || null });
   const newPlayer = (name, f) => ({ id: uid(), name, no: '', aliases: '', match: 'M', h: 3, c: 3, d: 3, s: 3, tags: [], target: 'average', minPts: 2, contacts: [], ...f });
 
   let Root = null, S = null, tab = 'game', sel = null, editing = null, seasonView = false, ptView = 'time', pointsSource = 'current', backupText = '', notice = '';
-  let playerOpen = null, openMic = false, fixLine = false;
+  let playerOpen = null, openMic = false, fixLine = false, teamView = 'roster', coachNote = '';
   let editIdx = null, settingsOpen = false, matchResult = null;
   let comboSize = '2', sendFor = null, reportNote = '', downloads = null;
   let memo = null, previews = null, confirmKey = null, confirmTimer = null, menu = null, voice = null;
@@ -55,7 +56,7 @@
 
   // Brings data saved by earlier versions forward.
   function migrate(s) {
-    if (s.teams) { s.teams.forEach((t) => { t.schedule = t.schedule || []; t.players.forEach((p) => { p.contacts = p.contacts || []; }); }); return s; }
+    if (s.teams) { s.teams.forEach((t) => { if (t.rules.ratioMode === 'fixed') t.rules.ratioMode = 'call'; t.schedule = t.schedule || []; t.players.forEach((p) => { p.contacts = p.contacts || []; }); }); return s; }
     s.schedule = s.schedule || [];
     s.players.forEach((p) => { p.contacts = p.contacts || []; });
     if (s.isExample) return freshRoot();
@@ -204,7 +205,7 @@
   const posAbbr = (id) => (POS(id) ? POS(id).abbr : '?');
 
   const whoName = (id) => (P(id) ? esc(P(id).name) : 'Removed player');
-  const evChip = (e, suffix) => (e.t === 'touch' ? `<span class="ev">${whoName(e.id)}${suffix || ''}</span>` : e.t === 'oppturn' ? '<span class="ev stat e-oppturn">Opponent turnover</span>' : `<span class="ev stat e-${e.t}">${STAT_LABEL[e.t]}: ${whoName(e.id)}${suffix || ''}</span>`);
+  const evChip = (e, suffix) => (e.t === 'touch' ? `<span class="ev">${whoName(e.id)}${suffix || ''}</span>` : e.t === 'oppturn' ? '<span class="ev stat e-oppturn">Opponent turnover</span>' : `<span class="ev stat e-${e.t}">${Report.label(e)}: ${whoName(e.id)}${suffix || ''}</span>`);
   function narrativeHtml(events, drag, suffix) {
     return Report.narrative(events).map((it, i) => {
       const attrs = drag ? `data-drag="ev:${i}" data-evi="${i}"` : '';
@@ -212,7 +213,7 @@
       if (it.t === 'touch' && !it.role) return `<span class="ev" ${attrs}>${whoName(it.id)}${q}</span>`;
       if (!it.id) return `<span class="ev stat e-${it.t}" ${attrs}>${it.t === 'oppgoal' ? 'Opponent goal' : 'Opponent turnover'}</span>`;
       const kind = it.role || it.t;
-      return `<span class="ev stat e-${kind}" ${attrs}>${STAT_LABEL[kind]}: ${whoName(it.id)}${q}</span>`;
+      return `<span class="ev stat e-${kind}" ${attrs}>${Report.label({ t: kind, sub: it.sub })}: ${whoName(it.id)}${q}</span>`;
     }).join('<span class="muted arrow"> → </span>');
   }
   function lineCard(id, pos) {
@@ -249,7 +250,7 @@
       <div class="chips">
         <span class="label">Point ${c.pointNo}</span>
         ${live ? `<span class="chip on${c.on}">${onLabel}</span>` : `<button type="button" class="chip on${c.on}" data-a="flip-on" aria-label="Next point is ${onLabel}. Tap to switch.">${onLabel} ⇄</button>`}
-        ${c.ratio ? (live ? `<span class="chip">${ratioLabel}</span>` : `<button type="button" class="chip" data-a="flip-ratio">${ratioLabel} ⇄</button>`) : ''}
+        ${c.ratio ? (live ? `<span class="chip">${ratioLabel}</span>` : `<button type="button" class="chip" data-a="flip-ratio">${ratioLabel}${S.rules.ratioMode === 'abba' ? '' : (S.rules.ratioMode === 'call' ? c.on === 'O' : c.caller === 'us') ? ' · we call' : ' · they call'} ⇄</button>`) : ''}
         ${c.halftime ? '<span class="chip">After halftime</span>' : ''}
       </div>
       <div class="right">
@@ -341,6 +342,7 @@
       <div class="chips"><button type="button" class="btn small-btn primary" data-a="voice-line" ${parts.length ? '' : 'disabled'}>Set line</button></div>`;
   }
 
+  const role = () => Root.gameRole || 'both';
   function draftScreen() {
     const g = G(), line = placedLine(), ids = placedIds(), target = targetSize();
     const rest = S.players.filter((p) => !g.out[p.id] && !g.draft.line[p.id]).map((p) => p.id);
@@ -358,7 +360,7 @@
           ${line ? strength(line) : ''}
           ${line && line.warnings.length ? `<div class="warns" role="status"><b>Check this line</b>${line.warnings.map((w) => `<span>${esc(w)}</span>`).join('')}</div>` : ''}
         </section>
-        ${suggestionPanel()}
+        ${role() === 'events' ? '' : suggestionPanel()}
         <div class="sticky-go">${selectionBar()}<button type="button" class="btn go" data-a="start-point" ${missing || !ids.length ? 'disabled' : ''}>${!target ? 'No players available' : missing ? `Pick ${missing} more` : 'Start point'}</button></div>
       </div>
       <section class="panel" aria-label="Bench" data-drop="bench">
@@ -394,7 +396,16 @@
     const items = narrativeHtml(ev, true);
     return `<div class="chain-row"><div class="chain" aria-live="polite">${items || '<span class="muted">Tap a player for a touch. Hold for goal, assist, turnover or block.</span>'}</div>${ev.length > 1 ? '<span class="small muted chain-hint">Hold and drag to reorder</span>' : ''}${ev.length ? '<button type="button" class="btn small-btn" data-a="undo-stat">Undo</button>' : ''}<button type="button" class="btn small-btn" data-a="voice-open" data-v="play">Voice</button></div>`;
   }
+  function linesLive() {
+    const g = G(), pv = getPreviews(), onField = liveOnField().filter(P);
+    return `${scoreboard(true)}<div class="game">
+      <section class="panel"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div>
+        ${g.live.review ? `<div class="warns"><b>${g.live.review.result === 'us' ? 'We scored' : 'They scored'}</b><span>Waiting for the point to be finalized.</span></div>` : ''}
+        <div class="label">On the field</div><div class="compact">${onField.map((id) => `<div>${freshTile(P(id), true)}<span class="cn">${nameTag(P(id))}</span></div>`).join('')}</div></section>
+      <section class="panel"><div class="panel-head"><h2>Next up</h2>${modeSeg()}</div><div class="next-cols">${compactLine(pv.us, 'If we score')}${compactLine(pv.them, 'If they score')}</div></section></div>`;
+  }
   function liveScreen() {
+    if (role() === 'lines') return linesLive();
     const g = G(), onField = liveOnField(), pv = getPreviews();
     const rest = S.players.filter((p) => !onField.includes(p.id) && !g.out[p.id]).map((p) => p.id);
     return `${scoreboard(true)}
@@ -414,8 +425,8 @@
         <div class="panel-foot"><span class="chips">${twoTap('cancel-pt', 'cancel-point', 'Cancel this point', 'Tap again to cancel')}<button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></div>
       </section>
       <section class="panel" data-drop="none">
-        <div class="panel-head"><h2>Next up</h2>${modeSeg()}</div>
-        <div class="next-cols">${compactLine(pv.us, 'If we score')}${compactLine(pv.them, 'If they score')}</div>
+        ${role() === 'events' ? '' : `<div class="panel-head"><h2>Next up</h2>${modeSeg()}</div>
+        <div class="next-cols">${compactLine(pv.us, 'If we score')}${compactLine(pv.them, 'If they score')}</div>`}
         <div class="label">Bench</div>
         <div class="list">${sortByOwed(rest).map((id) => benchRow(id, true)).join('')}</div>
       </section>
@@ -461,7 +472,7 @@
     return `<section class="panel"><div class="panel-head"><h2>Teams</h2></div>
       <div class="taglist">${Root.teams.map((t) => `<button type="button" class="tog" data-a="switch-team" data-v="${t.id}" aria-pressed="${t.id === S.id}">${esc(t.team)}${t.game ? ' · in game' : ''}</button>`).join('')}</div>
       <div class="form-row"><label class="field grow"><span class="label">This team's name</span><input id="team-name" type="text" data-c="team" value="${esc(S.team)}" autocomplete="off"></label>
-      ${Root.teams.length > 1 ? twoTap('delteam-' + S.id, 'delete-team', 'Delete team', 'Tap again to delete', 'danger') : ''}</div>
+      ${Root.teams.length > 1 && isAdmin() ? twoTap('delteam-' + S.id, 'delete-team', 'Delete team', 'Tap again to delete', 'danger') : ''}</div>
       <form class="form-row" data-form="team"><label class="field grow"><span class="label">New team</span><input id="new-team" type="text" placeholder="Team name" autocomplete="off"></label><button class="btn primary" type="submit">Add team</button></form>
       <p class="small muted">A new team starts with this team's rules and an empty roster.</p></section>`;
   }
@@ -501,8 +512,9 @@
       <div class="rp report-preview">${Report.fragment(S)}</div></div></div>`;
   }
   function rosterScreen() {
+    if (teamView === 'coaches') return `${teamsPanel()}${teamSeg()}${coachesPanel()}`;
     const skills = allSkills(), g = S.game;
-    return `${teamsPanel()}${gamesPanel()}<section class="panel"><div class="panel-head"><h2>${esc(S.team)} roster</h2><span class="small muted">Tap a number to change it. Tap a name for jersey, tags and playtime.</span></div>
+    return `${teamsPanel()}${teamSeg()}${gamesPanel()}<section class="panel"><div class="panel-head"><h2>${esc(S.team)} roster</h2><span class="small muted">Tap a number to change it. Tap a name for jersey, tags and playtime.</span></div>
       <form class="form-row" data-form="add"><label class="field grow"><span class="label">Add players (separate names with commas)</span><input id="add-name" type="text" placeholder="Sam, Priya, Theo" autocomplete="off"></label><button class="btn primary" type="submit">Add</button></form>
       ${S.players.length ? `<div class="tbl-scroll"><table><thead><tr><th>Player</th>${g ? '<th>This game</th>' : ''}${skills.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
       ${S.players.map((p) => `<tr><td><button type="button" class="who" data-a="edit" data-id="${p.id}"><span class="who-row">${tile(p, true)}<strong>${esc(p.name)}</strong></span><span>${[p.target !== 'average' ? `${TARGET_LABEL[p.target]} time` : '', `Min ${E.minPointsOf(p)}`, ...p.tags].filter(Boolean).map(esc).join(' · ')}</span></button></td>
@@ -529,20 +541,20 @@
   }
 
   /* ---------- Playtime and stats ---------- */
-  const STAT_KEYS = [['touch', 'Touches'], ['goal', 'Goals'], ['assist', 'Assists'], ['turn', 'Turnovers'], ['block', 'Blocks']];
+  const STAT_KEYS = [['touch', 'Touches'], ['goal', 'Goals'], ['assist', 'Assists'], ['turn', 'Turnovers'], ['drop', 'Drops'], ['block', 'Blocks']];
   function statTotals(season) {
-    const g = G(), totals = new Map(S.players.map((p) => [p.id, { played: 0, O: 0, D: 0, ms: 0, games: 0, touch: 0, goal: 0, assist: 0, turn: 0, block: 0 }]));
+    const g = G(), totals = new Map(S.players.map((p) => [p.id, { played: 0, O: 0, D: 0, ms: 0, games: 0, touch: 0, goal: 0, assist: 0, turn: 0, drop: 0, block: 0 }]));
     const add = (id, v) => { const t = totals.get(id); if (!t) return; t.played += v.played || 0; t.O += v.O || 0; t.D += v.D || 0; t.ms += v.ms || 0; if (v.played) t.games += 1; STAT_KEYS.forEach(([k]) => { t[k] += v[k] || 0; }); };
     if (season) S.history.forEach((h) => Object.entries(h.perPlayer).forEach(([id, v]) => add(id, v)));
     if (g) {
       stats().forEach((s, id) => add(id, s));
-      if (g.live) g.live.events.forEach((e) => { const t = totals.get(e.id); if (t) t[e.t] += 1; });
+      if (g.live) g.live.events.forEach((e) => { const t = totals.get(e.id); if (t && t[e.t] !== undefined) t[e.t] += 1; if (t && e.t === 'turn' && e.sub === 'drop') t.drop += 1; });
     }
     return totals;
   }
   function playtimeScreen() {
     const g = G(), showSeason = seasonView || !g;
-    const viewSeg = seg('pt-view', ptView, [['time', 'Playtime'], ['stats', 'Stats'], ['points', 'Points'], ['sheet', 'Scoresheet'], ['combos', 'Combos']]);
+    const viewSeg = seg('pt-view', ptView, [['time', 'Playtime'], ['stats', 'Box Score'], ['points', 'Points'], ['sheet', 'Scoresheet'], ['combos', 'Combos']]);
     if (ptView === 'points') return pointsScreen(viewSeg);
     if (ptView === 'sheet') return scoresheetScreen(viewSeg);
     if (ptView === 'stats') return statsScreen(viewSeg);
@@ -584,15 +596,29 @@
     const rows = src.points.map((p, i) => {
       p.result === 'us' ? us++ : them++;
       const name = (id) => (P(id) ? esc(P(id).name) : 'Removed player');
+      const ev = p.events || [], goal = ev.find((e) => e.t === 'goal'), assist = ev.find((e) => e.t === 'assist');
+      const by = p.result === 'us' ? (goal && P(goal.id) ? nameTag(P(goal.id)) : 'We scored') : 'Opponent';
+      const poss = Report.possession(p);
+      const tally = (title, match) => { const m = new Map(); ev.filter(match).forEach((e) => { if (e.id) m.set(e.id, (m.get(e.id) || 0) + 1); }); return m.size ? `<span><b>${title}:</b> ${[...m].map(([id, n]) => `${name(id)} ${n}`).join(', ')}</span>` : ''; };
+      const opp = ev.filter((e) => e.t === 'oppturn').length;
+      const notes = [tally('Throwaways', (e) => e.t === 'turn' && e.sub !== 'drop'), tally('Drops', (e) => e.t === 'turn' && e.sub === 'drop'), tally('Blocks', (e) => e.t === 'block' && e.sub !== 'int'), tally('Interceptions', (e) => e.t === 'block' && e.sub === 'int'), opp ? `<span><b>Opponent turnovers:</b> ${opp}</span>` : ''].join('');
       const chips = p.lineup.filter((id) => P(id)).map((id) => `<span class="sug static">${tile(P(id), true)}<span>${name(id)}</span><span class="tag small muted" ${tipAttr(posName((p.roles || {})[id]))}>${esc(posAbbr((p.roles || {})[id]))}</span></span>`).join('');
       const events = narrativeHtml(p.events);
       const subs = (p.subs || []).map((s) => `${name(s.in)} in for ${name(s.out)}`).join(', ');
-      return `<article class="pp"><div class="pp-head"><strong>Point ${i + 1}</strong><span class="chip on${p.on}">${p.on === 'O' ? 'Offense' : 'Defense'}</span><span>${p.result === 'us' ? 'We scored' : 'They scored'}</span><b class="pp-score">${us}–${them}</b><span class="muted small">${clock(p.endedAt - p.startedAt)}</span>${src.key === 'current' ? `<button type="button" class="btn small-btn pp-edit" data-a="edit-point" data-v="${i}">Edit</button>` : ''}</div>
+      return `<article class="pp">
+        <div class="pg"><span class="pg-no">${i + 1}</span><span class="pg-score ${p.result}">${us} - ${them}</span>
+          <div class="pg-by"><strong>${by}</strong>${assist && P(assist.id) ? `<span class="small muted">Assist: ${nameTag(P(assist.id))}</span>` : ''}</div>
+          <span class="pg-start on${p.on}" title="${p.on === 'O' ? 'Started on offense' : 'Started on defense'}">${p.on}</span>
+          ${Report.possessionBar(p)}
+          <div class="pg-len"><b>${clock(p.endedAt - p.startedAt)}</b><span class="small muted">${poss.catches} ${poss.catches === 1 ? 'catch' : 'catches'}</span></div>
+          <div class="pg-notes small">${notes || '<span class="muted">No turnovers or blocks</span>'}</div>
+          ${src.key === 'current' ? `<button type="button" class="btn small-btn pg-edit" data-a="edit-point" data-v="${i}">Edit</button>` : ''}</div>
         <div class="sug-chips">${chips}</div>
         ${events ? `<div class="chain">${events}</div>` : ''}${subs ? `<p class="small muted">Subs: ${subs}</p>` : ''}</article>`;
     }).reverse().join('');
+    const pgHead = rows ? '<div class="pg pg-head"><span>#</span><span>Score</span><span>Scored by</span><span>Start</span><span>Disc possession (bar is the whole point)</span><span></span><span>Turnovers and blocks</span></div><p class="small muted pg-key"><i class="us"></i> Our disc <i class="them"></i> Their disc · B block · I interception · T turnover</p>' : '';
     const reopen = src.key !== 'current' ? `<div>${twoTap('reopen-p-' + src.key, 'reopen-game', 'Reopen this game to edit', 'Tap again to reopen', '', `data-id="${src.key}" ${G() ? 'disabled' : ''}`)}${G() ? ' <span class="small muted">Finish the game in progress first.</span>' : ''}</div>` : '';
-    return `<section class="panel">${head}${sourceSelect(sources, src)}${reopen}${rows || '<p class="muted">No points played yet.</p>'}</section>`;
+    return `<section class="panel">${head}${sourceSelect(sources, src)}${reopen}${pgHead}${rows || '<p class="muted">No points played yet.</p>'}</section>`;
   }
 
   /* Handlers first, then cutters; each split by matchup on a mixed team. */
@@ -633,7 +659,7 @@
       ${pts.length ? `<div class="tbl-wrap"><table class="ss"><thead><tr><th class="ss-name">Point</th>${heads}</tr><tr><th class="ss-name">Started on</th>${pts.map((p) => `<th class="${p.result === 'us' ? 'us' : ''}">${p.on}</th>`).join('')}</tr></thead><tbody>${body}</tbody><tfoot><tr><th class="ss-name">Score</th>${scores.map((s, i) => `<td class="${pts[i].result === 'us' ? 'us' : ''}">${s}</td>`).join('')}</tr></tfoot></table></div>` : '<p class="muted">No points played yet.</p>'}</section>`;
   }
   function statsScreen(viewSeg) {
-    const sources = gameSources(), head = viewHead('Stats', viewSeg);
+    const sources = gameSources(), head = viewHead('Box Score', viewSeg);
     const season = pointsSource === 'season' || !sources.length;
     const options = `<option value="season" ${season ? 'selected' : ''}>Season</option>`;
     if (season) {
@@ -696,6 +722,35 @@
       <p class="small muted">Groups that started more than one point together. Offense is scored on O points; Defense is breaks on D points.</p>
       ${rows ? `<div class="tbl-wrap"><table class="bx"><thead><tr><th class="bx-name">Players</th><th>Points</th><th>Won–lost</th><th>+/–</th><th>Offense</th><th>Defense</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No group has played more than one point together yet.</p>'}
       <h3>Who threw to whom</h3><p class="small muted">Darker boxes mean more throws. Tap a box for names.</p>${hmLegend}${matrix}${biasNote}</section>`;
+  }
+
+  /* ---------- Every game on every team ---------- */
+  function gamesScreen() {
+    const upcoming = [], live = [], done = [];
+    const dated = (ms) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    Root.teams.forEach((t) => {
+      if (t.game) live.push({ t, sort: t.game.startedAt, title: `vs ${t.game.opponent || 'Opponent'}`, when: dated(t.game.startedAt), score: `${t.game.points.filter((p) => p.result === 'us').length}–${t.game.points.filter((p) => p.result === 'them').length}`, btn: `<button type="button" class="btn small-btn primary" data-a="open-any" data-team="${t.id}" data-v="current">Open</button>` });
+      (t.schedule || []).filter((x) => !x.gameId).forEach((x) => upcoming.push({ t, sort: new Date(`${x.date}T12:00:00`).getTime(), title: `vs ${x.opponent || 'Opponent'}`, when: `${longDate(x.date)}${x.time ? ' · ' + x.time : ''}${x.location ? ' · ' + x.location : ''}`, score: '', btn: t.game ? '' : `<button type="button" class="btn small-btn" data-a="any-start" data-team="${t.id}" data-id="${x.id}">Start</button>` }));
+      t.history.forEach((h) => done.push({ t, sort: h.date, title: `vs ${h.opponent || 'Opponent'}`, when: dated(h.date), score: `${h.us}–${h.them}`, btn: `<button type="button" class="btn small-btn" data-a="open-any" data-team="${t.id}" data-v="${h.id}">Box score</button>` }));
+    });
+    upcoming.sort((a, b) => a.sort - b.sort); done.sort((a, b) => b.sort - a.sort);
+    const row = (g) => `<div class="game-row"><div class="game-info"><strong>${esc(g.t.team)} ${esc(g.title)}${g.score ? ` · ${g.score}` : ''}</strong><span class="small muted">${esc(g.when)}</span></div><div class="chips">${g.btn}</div></div>`;
+    const block = (title, list) => (list.length ? `<div class="label">${title}</div>${list.map(row).join('')}` : '');
+    return `<section class="panel"><h2>Games</h2>${block('In progress', live)}${block('Upcoming', upcoming)}${block('Finished', done) || (live.length || upcoming.length ? '' : '<p class="muted">No games yet. Add one under Teams.</p>')}</section>`;
+  }
+  const teamSeg = () => `<div>${seg('team-view', teamView, [['roster', 'Roster'], ['coaches', 'Coaches']])}</div>`;
+  const myEmail = () => (CloudLink && CloudLink.user ? (CloudLink.user.email || '').toLowerCase() : '');
+  const isAdmin = () => !S.access || S.access.admin === myEmail();
+  function coachesPanel() {
+    if (!CloudLink) return '<section class="panel"><h2>Coaches</h2><p class="muted">Coaches are available in the Android app and on the desktop site, once you sign in.</p></section>';
+    if (!CloudLink.user) return '<section class="panel"><h2>Coaches</h2><p>Sign in with Google to share this team with other coaches.</p><div><button type="button" class="btn small-btn primary" data-a="cloud-in">Sign in with Google</button></div></section>';
+    if (S.isExample) return '<section class="panel"><h2>Coaches</h2><p class="muted">Add your own team to invite coaches. The example team stays on this device.</p></section>';
+    const acc = S.access || { admin: myEmail(), coaches: [myEmail()] }, admin = acc.admin === myEmail();
+    return `<section class="panel"><h2>Coaches</h2><p class="small muted">Coaches can see everything on this team, including ratings, and can record games. They sign in with Google using the email address below.</p>
+      ${acc.coaches.map((c) => `<div class="sub-row"><span><strong>${esc(c)}</strong> ${c === acc.admin ? '<span class="small muted">Admin</span>' : ''}${c === myEmail() ? ' <span class="small muted">You</span>' : ''}</span>${admin && c !== acc.admin ? twoTap('rmcoach-' + c, 'remove-coach', 'Remove', 'Tap again', 'danger', `data-v="${esc(c)}"`) : ''}</div>`).join('')}
+      ${admin ? `<form class="form-row" data-form="coach"><label class="field grow"><span class="label">Invite by Google email</span><input id="coach-email" type="email" autocomplete="off" required></label><button class="btn primary" type="submit">Invite</button></form>` : '<p class="small muted">Only the admin can invite or remove coaches.</p>'}
+      ${coachNote ? `<p class="small" role="status">${esc(coachNote)}</p>` : ''}
+    </section>`;
   }
 
   /* ---------- Players ---------- */
@@ -775,8 +830,10 @@
         <div class="rl"><span>Halftime at</span>${stepper('rule', r.halfAt, 1, 25, 'data-k="halfAt"')}</div>
         <div class="rl"><span>Game to</span>${stepper('rule', r.gameTo, 1, 25, 'data-k="gameTo"')}</div>
         <div class="rl"><span>Division</span>${seg('division', r.division, [['open', 'Single'], ['mixed', 'Mixed']])}</div>
-        ${r.division === 'mixed' ? `<div class="rl"><span>Gender ratio</span>${seg('ratio-mode', r.ratioMode, [['abba', 'ABBA'], ['fixed', 'Fixed']])}</div>
-        <div class="rl"><span>${r.ratioMode === 'abba' ? 'First point has more' : 'Extra player is'}</span>${seg('ratio-start', r.ratioStart, [['W', 'Women'], ['M', 'Men']])}</div>` : ''}
+        ${r.division === 'mixed' ? `<div class="rl"><span>Gender ratio</span>${seg('ratio-mode', r.ratioMode, [['abba', 'ABBA'], ['gendzone', 'Gendzone'], ['call', 'Offense Calls']])}</div>
+        <div class="rl"><span>${r.ratioMode === 'abba' ? 'First point has more' : 'Usually more'}</span>${seg('ratio-start', r.ratioStart, [['W', 'Women'], ['M', 'Men']])}</div>
+        ${r.ratioMode === 'gendzone' ? `<div class="rl"><span>In the gendzone on point 1</span>${seg('gendzone-first', r.gendzoneUs === false ? 'them' : 'us', [['us', 'Us'], ['them', 'Them']])}</div>` : ''}
+        ${r.ratioMode === 'abba' ? '' : '<p class="small muted">Tap the ratio on the Current Game screen to set each point\'s call.</p>'}` : ''}
         <h3>Playing time</h3>
         <div class="rl"><span>Points anyone can fall behind target</span>${stepper('rule', r.tolerance, 1, 6, 'data-k="tolerance"')}</div>
         <div class="rl"><span>Points in a row before a rest</span>${stepper('rule', r.maxStreak, 1, 6, 'data-k="maxStreak"')}</div>
@@ -798,7 +855,7 @@
   function menuView() {
     if (!menu || !P(menu.id)) return '';
     return `<div class="menu-scrim" data-a="menu-close" data-self="1"><div class="menu" id="stat-menu" style="left:${menu.x}px;top:${menu.y}px" role="menu" aria-label="${esc(P(menu.id).name)}"><div class="label">${esc(P(menu.id).name)}</div>
-      ${Object.entries(STAT_LABEL).map(([t, l]) => `<button type="button" data-a="stat" data-v="${t}" role="menuitem">${l}</button>`).join('')}
+      ${STAT_MENU.map(([t, sub, l]) => `<button type="button" data-a="stat" data-v="${t}" data-sub="${sub}" role="menuitem">${l}</button>`).join('')}
       ${editIdx === null ? '<button type="button" data-a="menu-sub" role="menuitem">Sub out</button>' : ''}</div></div>`;
   }
   function settingsSheet() {
@@ -810,6 +867,9 @@
       ${CloudLink ? `<div class="label">Account</div>
       ${CloudLink.user ? `<div class="sub-row"><span><strong>${esc(CloudLink.user.email || 'Signed in')}</strong><br><span class="small muted">${esc(CloudLink.status || 'Connecting…')}</span></span><button type="button" class="btn small-btn" data-a="cloud-out">Sign out</button></div>` : `<div><button type="button" class="btn small-btn primary" data-a="cloud-in">Sign in with Google</button></div><p class="small muted">Sign in to keep your teams in your account and use them on every device. Your work stays on this device until you do.</p>`}
       ${CloudLink.problem ? `<p class="small bad-text" role="status">${esc(CloudLink.problem)}</p>` : ''}` : ''}
+      <div class="label">On this device I'm</div>
+      <div>${seg('game-role', role(), [['both', 'Doing both'], ['lines', 'Calling lines'], ['events', 'Logging events']])}</div>
+      <p class="small muted">When two coaches share a game, each device can focus on one job.</p>
       <div class="label">Voice listens for</div>
       <div>${seg('voice-mode', Root.voiceMode || 'focused', [['focused', 'My roster'], ['any', 'Any words']])}</div>
       <p class="small muted">My roster is more accurate because it only listens for your players and ultimate words. If a name isn't being heard, it may be spelled in a way the recognizer doesn't know. Add a common spelling under that player's "Sounds like", or try Any words.</p>
@@ -823,11 +883,12 @@
     const g = S.game;
     let view;
     if (tab === 'game') view = !g ? setupScreen() : editIdx !== null && g.points[editIdx] ? pointEditor() : g.live ? liveScreen() : draftScreen();
+    else if (tab === 'games') view = gamesScreen();
     else if (tab === 'roster') view = rosterScreen();
     else if (tab === 'players') view = playerOpen && P(playerOpen) ? playerProfile(P(playerOpen)) : playersScreen();
     else if (tab === 'time') view = (g || S.history.length) ? playtimeScreen() : '<section class="panel"><h2>Playtime</h2><p class="muted">Start a game and each player\'s points and minutes show up here.</p></section>';
     else view = rulesScreen();
-    const tabs = [['game', 'Game'], ['roster', 'Teams'], ['players', 'Players'], ['time', 'Playtime'], ['rules', 'Rules']];
+    const tabs = [['game', 'Current Game'], ['games', 'Games'], ['roster', 'Teams'], ['players', 'Players'], ['time', 'Stats'], ['rules', 'Rules']];
     root.innerHTML = `<div class="wrap">
       <header class="bar"><h1 class="brand">Line Caller</h1><button type="button" class="team-now" data-a="tab" data-v="roster">${esc(S.team)}</button><nav class="tabs">${tabs.map(([k, l]) => `<button type="button" class="tab" data-a="tab" data-v="${k}" ${tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}${CloudLink && !CloudLink.user ? '<button type="button" class="tab" data-a="cloud-in">Sign in</button>' : ''}<button type="button" class="tab" data-a="settings-open">Settings</button></nav></header>
       ${S.isExample ? `<div class="banner"><span>You're looking at an example team. The players and ratings are made up.</span>${twoTap('clear', 'clear-example', 'Clear it and add my team', 'Tap again to clear')}</div>` : ''}
@@ -1015,7 +1076,7 @@
   function stopVoice() { if (voice && voice.listening) Speech.cancel(); }
 
   /* ---------- Actions ---------- */
-  function resume(l) { if (!l.pausedAt) return; const d = Date.now() - l.pausedAt; l.startedAt += d; (l.subs || []).forEach((s) => { s.at += d; }); delete l.pausedAt; }
+  function resume(l) { if (!l.pausedAt) return; const d = Date.now() - l.pausedAt; l.startedAt += d; (l.subs || []).forEach((s) => { s.at += d; }); (l.events || []).forEach((e) => { if (e.at) e.at += d; }); delete l.pausedAt; }
   const A = {
     tab(d) { stopVoice(); uiChange(() => { tab = d.v; sel = null; voice = null; menu = null; editIdx = null; fixLine = false; }); },
     confirm(d, el) {
@@ -1121,7 +1182,7 @@
       uiChange(() => { sel = sel === d.id ? null : d.id; });
     },
     'menu-close'() { uiChange(() => { menu = null; }); },
-    stat(d) { const id = menu.id; menu = null; if (d.v === 'goal' && editIdx === null && !G().live.review) { addStats([{ t: 'goal', id }]); A.result({ v: 'us' }); return; } (editIdx !== null ? commit : commitLight)(() => addStats([{ t: d.v, id }])); },
+    stat(d) { const id = menu.id; menu = null; if (d.v === 'goal' && editIdx === null && !G().live.review) { addStats([{ t: 'goal', id }]); A.result({ v: 'us' }); return; } (editIdx !== null ? commit : commitLight)(() => addStats([{ t: d.v, id, ...(d.sub ? { sub: d.sub } : {}) }])); },
     'opp-turn'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'oppturn' }])); },
     pause() { const l = G().live; commitLight(() => { if (l.pausedAt) resume(l); else l.pausedAt = Date.now(); }); },
     'edit-prev'() { stopVoice(); uiChange(() => { editIdx = G().points.length - 1; sel = null; voice = null; }); },
@@ -1167,7 +1228,7 @@
       editIdx = null;
       commit(() => {
         const g = G(), sc = E.score(g), st = E.replay(g, S.players, S.rules), perPlayer = {};
-        st.forEach((s, id) => { if (s.played) perPlayer[id] = { played: s.played, O: s.O, D: s.D, ms: s.ms, touch: s.touch, goal: s.goal, assist: s.assist, turn: s.turn, block: s.block }; });
+        st.forEach((s, id) => { if (s.played) perPlayer[id] = { drop: s.drop, played: s.played, O: s.O, D: s.D, ms: s.ms, touch: s.touch, goal: s.goal, assist: s.assist, turn: s.turn, block: s.block }; });
         S.history.push({ id: g.id, opponent: g.opponent, date: g.startedAt, us: sc.us, them: sc.them, perPlayer, points: g.points, startOn: g.startOn, mode: g.mode, out: g.out });
         S.history.sort((x, y) => x.date - y.date);
         S.lastFinal = g.id;
@@ -1212,6 +1273,11 @@
       openMic = true;
       startOpenMic();
     },
+    'team-view'(d) { uiChange(() => { teamView = d.v; coachNote = ''; }); },
+    'open-any'(d) { stopVoice(); commit(() => { Root.active = d.team; S = activeTeam(); sel = null; editIdx = null; voice = null; if (d.v === 'current') tab = 'game'; else { tab = 'time'; ptView = 'stats'; pointsSource = d.v; } }); },
+    'any-start'(d) { commit(() => { Root.active = d.team; S = activeTeam(); const x = S.schedule.find((y) => y.id === d.id); S.setup = { opponent: x.opponent, startOn: 'O', out: {}, scheduleId: x.id }; tab = 'game'; }); },
+    'remove-coach'(d) { CloudLink.removeCoach(S.id, d.v); },
+    'game-role'(d) { commit(() => { Root.gameRole = d.v; }); },
     'pt-view'(d) { uiChange(() => { ptView = d.v; }); },
     'combo-size'(d) { uiChange(() => { comboSize = d.v; }); },
     'del-schedule'(d) { commit(() => { S.schedule = S.schedule.filter((x) => x.id !== d.id); }); },
@@ -1258,6 +1324,7 @@
     'del-pos'(d) { commit(() => { S.rules.positions.splice(Number(d.i), 1); redraft(); }); },
     division(d) { commit(() => { S.rules.division = d.v; redraft(); }); },
     'ratio-mode'(d) { commit(() => { S.rules.ratioMode = d.v; redraft(); }); },
+    'gendzone-first'(d) { commit(() => { S.rules.gendzoneUs = d.v === 'us'; redraft(); }); },
     'ratio-start'(d) { commit(() => { S.rules.ratioStart = d.v; redraft(); }); },
     tagrule(d) { commit(() => { const t = S.rules.tagRules[d.i]; if (d.k === 'min') t.min = (t.min || 0) + Number(d.d); else { const cur = t.max === null ? S.rules.size : t.max; const nx = cur + Number(d.d); t.max = nx >= S.rules.size ? null : nx; } redraft(); }); },
     'tagrule-when'(d) { commit(() => { const t = S.rules.tagRules[d.i]; t.when = t.when === 'all' ? 'O' : t.when === 'O' ? 'D' : 'all'; redraft(); }); },
@@ -1432,6 +1499,10 @@
       const names = document.getElementById('add-name').value.split(',').map((s) => s.trim()).filter(Boolean);
       if (names.length) commit(() => { names.forEach((n) => S.players.push(newPlayer(n))); });
     }
+    if (form === 'coach') {
+      const email = document.getElementById('coach-email').value.trim().toLowerCase();
+      if (email.includes('@')) { coachNote = `${email} can now open this team by signing in with that Google account. Send them ${window.location.protocol === 'https:' && !window.location.hostname.includes('localhost') ? window.location.href.split('#')[0] : 'the app link'}.`; CloudLink.addCoach(S.id, email); render(); }
+    }
     if (form === 'schedule') {
       const opponent = document.getElementById('sch-opp').value.trim(), date = document.getElementById('sch-date').value;
       if (opponent && date) commit(() => { S.schedule.push({ id: uid(), opponent, date, time: document.getElementById('sch-time').value.trim(), location: document.getElementById('sch-loc').value.trim() }); });
@@ -1460,49 +1531,91 @@
     firebase.initializeApp(window.FIREBASE_CONFIG);
     const auth = firebase.auth(), fs = firebase.firestore();
     fs.enablePersistence({ synchronizeTabs: true }).catch(() => { /* another tab holds it; sync still works */ });
-    const known = new Set();
-    let user = null, unsub = null, ready = false, timer = null, status = '', problem = '', plug = null;
+    const known = new Set(), listeners = new Map();
+    let user = null, stopTeams = null, ready = false, timer = null, status = '', problem = '', plug = null;
     const native = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     const nativeAuth = () => { if (!plug) plug = window.Capacitor.registerPlugin('FirebaseAuthentication'); return plug; };
     const persist = () => { try { localStorage.setItem(KEY_STORE, JSON.stringify(Root)); } catch (e) { /* keep going */ } };
-    const col = () => fs.collection('users').doc(user.uid).collection('docs');
-    function refresh() { if (!dragging) { S = activeTeam(); touch(); render(); } }
+    const email = () => (user.email || '').toLowerCase();
+    const teams = () => fs.collection('teams');
+    const docs = (id) => teams().doc(id).collection('docs');
+    const fail = (e) => { problem = `Sync failed: ${e.message}`; if (settingsOpen && !dragging) render(); };
+    function settle() {
+      const real = Root.teams.filter((t) => !t.isExample);
+      if (real.length) Root.teams = real;
+      if (!Root.teams.length) Root.teams = [example()];
+      if (!Root.teams.some((t) => t.id === Root.active)) Root.active = Root.teams[0].id;
+      persist();
+      if (!dragging) { S = activeTeam(); touch(); render(); }
+    }
+    function stopTeam(id) {
+      if (listeners.has(id)) { listeners.get(id)(); listeners.delete(id); }
+      [...known].filter((k) => k.split('_')[1] === id).forEach((k) => known.delete(k));
+    }
+    const makeTeam = (id) => { const t = blank(); t.id = id; return t; };
+    function listenTeam(id) {
+      if (listeners.has(id)) return;
+      listeners.set(id, docs(id).onSnapshot({ includeMetadataChanges: true }, (snap) => {
+        let changed = false;
+        Cloud.inOrder(snap.docChanges().map((c) => ({ type: c.type, id: c.doc.id, data: c.doc.data() }))).forEach((c) => { if (Cloud.incoming(Root, c, known, makeTeam)) changed = true; });
+        status = snap.metadata.hasPendingWrites ? 'Changes will upload when you are online.' : snap.metadata.fromCache ? 'Offline. Your work is saved on this device.' : 'Up to date.';
+        if (changed) settle(); else if (settingsOpen && !dragging) render();
+      }, fail));
+    }
     function flush() {
       if (!user || !ready) return;
+      Root.teams.filter((t) => !t.isExample && !t.access).forEach((t) => {
+        t.access = { admin: email(), coaches: [email()], name: t.team };
+        teams().doc(t.id).set(t.access).catch(fail);
+        listenTeam(t.id);
+      });
+      Root.teams.filter((t) => t.access && t.access.admin === email() && t.access.name !== t.team).forEach((t) => { t.access.name = t.team; teams().doc(t.id).update({ name: t.team }).catch(fail); });
       const { writes, deletes } = Cloud.outgoing(Root, known, Date.now());
-      if (!writes.length && !deletes.length) return;
+      if (!writes.length && !deletes.length) { persist(); return; }
       persist();
-      const ops = [...writes.map((w) => (b) => b.set(col().doc(w.id), w.data)), ...deletes.map((id) => (b) => b.delete(col().doc(id)))];
+      const ops = [...writes.map((w) => (b) => b.set(docs(w.data.teamId).doc(w.id), w.data)), ...deletes.map((id) => (b) => b.delete(docs(id.split('_')[1]).doc(id)))];
       for (let i = 0; i < ops.length; i += 100) {
         const batch = fs.batch();
         ops.slice(i, i + 100).forEach((op) => op(batch));
-        batch.commit().catch((e) => { problem = `Sync failed: ${e.message}`; if (settingsOpen) render(); });
+        batch.commit().catch(fail);
       }
+      deletes.filter((id) => id.startsWith('t_')).forEach((id) => { const tid = id.slice(2); stopTeam(tid); teams().doc(tid).delete().catch(fail); });
+    }
+    // Moves teams saved by the earlier single-account version into shared teams, once per device.
+    async function migrate() {
+      if (Root.cloudShared) return;
+      try {
+        const old = await fs.collection('users').doc(user.uid).collection('docs').get();
+        const scratch = new Set();
+        Cloud.inOrder(old.docs.map((d) => ({ type: 'added', id: d.id, data: d.data() }))).forEach((c) => Cloud.incoming(Root, c, scratch, makeTeam));
+      } catch (e) { /* nothing older to bring over */ }
+      Root.teams.forEach((t) => { delete t.syncHash; });
+      Root.cloudShared = true;
     }
     function listen() {
       ready = false;
-      unsub = col().onSnapshot({ includeMetadataChanges: true }, (snap) => {
+      stopTeams = teams().where('coaches', 'array-contains', email()).onSnapshot({ includeMetadataChanges: true }, async (snap) => {
+        const ids = new Set();
         let changed = false;
-        snap.docChanges().forEach((c) => {
-          if (Cloud.incoming(Root, { type: c.type, id: c.doc.id, data: c.doc.data() }, known, (id) => { const t = blank(); t.id = id; return t; })) changed = true;
+        snap.forEach((d) => {
+          ids.add(d.id);
+          let t = Root.teams.find((x) => x.id === d.id);
+          if (!t) { t = makeTeam(d.id); t.team = d.data().name || 'Team'; Root.teams.push(t); changed = true; }
+          const access = d.data();
+          if (JSON.stringify(t.access) !== JSON.stringify(access)) { t.access = access; changed = true; }
+          listenTeam(d.id);
         });
-        const wasReady = ready;
-        ready = true;
-        status = snap.metadata.hasPendingWrites ? 'Changes will upload when you are online.' : snap.metadata.fromCache ? 'Offline. Your work is saved on this device.' : 'Up to date.';
+        if (!snap.metadata.fromCache) {
+          Root.teams.filter((t) => t.access && !ids.has(t.id) && !snap.metadata.hasPendingWrites).forEach((t) => { stopTeam(t.id); Root.teams = Root.teams.filter((x) => x !== t); changed = true; });
+        }
+        if (!ready) { await migrate(); ready = true; flush(); changed = true; }
         problem = '';
-        if (changed) {
-          const real = Root.teams.filter((t) => !t.isExample);
-          if (real.length) Root.teams = real;
-          if (!Root.teams.length) Root.teams = [example()];
-          if (!Root.teams.some((t) => t.id === Root.active)) Root.active = Root.teams[0].id;
-          persist();
-          refresh();
-        } else if (settingsOpen && !dragging) render();
-        if (!wasReady) flush();
+        if (changed) settle();
       }, (e) => { problem = `Sync stopped: ${e.message}`; if (!dragging) render(); });
     }
     auth.onAuthStateChanged((u) => {
-      if (unsub) { unsub(); unsub = null; }
+      if (stopTeams) { stopTeams(); stopTeams = null; }
+      [...listeners.keys()].forEach(stopTeam);
       known.clear(); ready = false; user = u; status = '';
       if (u) listen();
       if (S) render();
@@ -1511,7 +1624,9 @@
       get user() { return user; },
       get status() { return status; },
       get problem() { return problem; },
-      schedule() { clearTimeout(timer); timer = setTimeout(flush, 4000); },
+      schedule() { clearTimeout(timer); timer = setTimeout(flush, 1500); },
+      addCoach(id, who) { teams().doc(id).update({ coaches: firebase.firestore.FieldValue.arrayUnion(who) }).catch(fail); },
+      removeCoach(id, who) { teams().doc(id).update({ coaches: firebase.firestore.FieldValue.arrayRemove(who) }).catch(fail); },
       async signIn() {
         problem = '';
         try {
@@ -1520,7 +1635,7 @@
             await auth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential(r.credential.idToken));
           } else await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
         } catch (e) {
-          problem = native() ? `Google sign-in didn't finish. It needs Google Play on this device. (${e.message || e})` : `Sign-in didn't finish. (${e.message || e})`;
+          problem = native() ? `Google sign-in didn't finish. (${e.message || e})` : `Sign-in didn't finish. (${e.message || e})`;
           render();
         }
       },
