@@ -12,7 +12,20 @@
           "package_name": "app.linecaller.ultimate"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "144572757116-vhqbmro5iolkar0b9h3jckltove8vm7h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "app.linecaller.ultimate",
+            "certificate_hash": "07d1e5771525a9c664a26e278e68ee1235f490ed"
+          }
+        },
+        {
+          "client_id": "144572757116-7j54r51c54m508bo6512d4lgnoirrge6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyD1V8Rm1MVssNvOgzdPXNoEqGBM6QZD5OU"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "144572757116-7j54r51c54m508bo6512d4lgnoirrge6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
