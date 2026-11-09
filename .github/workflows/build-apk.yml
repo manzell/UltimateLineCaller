@@ -28,7 +28,18 @@ jobs:
           rm -rf android/app/src/main/assets/model-en-us
           mv vosk-model-small-en-us-0.15 android/app/src/main/assets/model-en-us
           echo "small-en-us-0.15" > android/app/src/main/assets/model-en-us/uuid
-      - run: chmod +x android/gradlew && cd android && ./gradlew assembleDebug --no-daemon
+      - name: Build the app
+        run: |
+          set -o pipefail
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleDebug --no-daemon --console=plain 2>&1 | tee ../gradle.log
+      - name: Show why the build failed
+        if: failure()
+        run: |
+          # Annotations can be read without signing in, unlike full job logs.
+          text="$( (grep -n -E 'What went wrong|error:|Could not|FAILED|> Failed|wrong:|symbol:|location:' -A6 gradle.log | head -c 40000; echo ----; tail -c 8000 gradle.log) )"
+          text="${text//'%'/'%25'}"; text="${text//$'\n'/'%0A'}"; text="${text//$'\r'/'%0D'}"
+          echo "::error title=Gradle build::${text}"
       - name: Publish the APK as the latest release
         run: gh release create "build-${{ github.run_number }}" android/app/build/outputs/apk/debug/app-debug.apk --title "Build ${{ github.run_number }}" --latest
         env:
