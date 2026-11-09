@@ -1,0 +1,6 @@
+{
+  "appId": "app.linecaller.ultimate",
+  "appName": "Line Caller",
+  "webDir": "www",
+  "android": { "backgroundColor": "#e9edf5", "adjustMarginsForEdgeToEdge": "auto" }
+}
