@@ -168,7 +168,7 @@ const Report = (() => {
       <p class="ln-note">Each filled box is the team that scored that point, with the running score. A heavy outline marks the team on offense. A red outline is a break: the team on defense scored.</p>`;
   }
 
-  const COLS = [['touch', 'Touches'], ['goal', 'Goals'], ['assist', 'Assists'], ['throw', 'Throwaways'], ['drop', 'Drops'], ['block', 'Blocks']];
+  const COLS = [['touch', 'Touches'], ['goal', 'Goals'], ['assist', 'Assists'], ['turn', 'Turnovers'], ['block', 'Blocks']];
   const statVal = (t, k) => (k === 'throw' ? (t.turn || 0) - (t.drop || 0) : t[k] || 0);
   const jerseyNum = (p) => { const n = parseInt(p.no, 10); return Number.isNaN(n) ? 9999 : n; };
   function statTable(players, map, extra) {
@@ -214,7 +214,7 @@ const Report = (() => {
 .bx .bx-no { color: var(--muted); width: 2.5em; }
 .bx-box { width: auto; }
 .bx-box th, .bx-box td { padding: 3px 4px; }
-.bx-box th:not(.bx-name):not(.bx-no), .bx-box td:not(.bx-name):not(.bx-no) { width: 76px; min-width: 76px; max-width: 76px; text-align: center; }
+.bx-box th:not(.bx-name):not(.bx-no), .bx-box td:not(.bx-name):not(.bx-no) { width: 70px; min-width: 70px; max-width: 70px; text-align: center; }
 .bx-box .bx-name { min-width: 120px; padding-right: 14px; }
 .bx tfoot td { font-weight: 700; border-top: 2px solid var(--ink); }
 .rp-chain b { padding: 0 5px; border-radius: 3px; color: #ffffff; font-weight: 700; }

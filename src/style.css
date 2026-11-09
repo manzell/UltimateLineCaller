@@ -434,3 +434,9 @@ summary { cursor: pointer; min-height: 40px; display: flex; align-items: center;
   .pg-notes { grid-column: 3 / -1; }
   .pg-edit { grid-column: 1 / -1; justify-self: end; }
 }
+
+/* Puller candidates before the pull */
+.tile.pull-ring { box-shadow: 0 0 0 2px rgba(255, 255, 255, .7), 0 0 0 3.5px rgba(0, 0, 0, .18); }
+.ev.e-pull { background: #5b6b8c; color: #ffffff; }
+.check { display: flex; align-items: center; gap: 8px; }
+.check input { width: 20px; height: 20px; }

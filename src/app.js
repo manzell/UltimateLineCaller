@@ -194,11 +194,15 @@
   const pts = (s) => `${s.played}/${s.target.toFixed(1)} pts`;
   const owedText = (s) => { const d = s.target - s.played; return d >= 0.75 ? `Owed ${d.toFixed(1)}` : d <= -0.75 ? `Over ${(-d).toFixed(1)}` : 'On target'; };
   const owedTip = (s) => `Played ${s.played}. Fair share so far is ${s.target.toFixed(1)} points, based on who has been available and each player's target.`;
-  const matchBadge = (p) => (mixed() ? `<span class="mb ${p.match}" ${tipAttr(p.match === 'W' ? 'WMP: women-matching player' : 'MMP: men-matching player')}>${p.match === 'W' ? 'WMP' : 'MMP'}</span>` : '');
+  // Youth teams say Gx/Bx and girls/boys instead of WMP/MMP and women/men.
+  const GL = (m) => (S.youth ? (m === 'W' ? 'Gx' : 'Bx') : (m === 'W' ? 'WMP' : 'MMP'));
+  const GW = (m, cap) => { const w = S.youth ? (m === 'W' ? 'girls' : 'boys') : (m === 'W' ? 'women' : 'men'); return cap ? w[0].toUpperCase() + w.slice(1) : w; };
+  const gWords = (s) => (S.youth ? s.replace(/women-matching/g, 'Gx').replace(/men-matching/g, 'Bx') : s);
+  const matchBadge = (p) => (mixed() ? `<span class="mb ${p.match}" ${tipAttr(S.youth ? `${GL(p.match)}: ${GW(p.match) === 'girls' ? 'girl' : 'boy'}-matching player` : p.match === 'W' ? 'WMP: women-matching player' : 'MMP: men-matching player')}>${GL(p.match)}</span>` : '');
   const tile = (p, small) => `<span class="tile ${mixed() ? p.match : ''} ${small ? 'sm' : ''}" aria-label="Jersey ${esc(p.no || 'not set')}">${esc(p.no || '–')}</span>`;
   // Badge during a game: the player's energy, shading to yellow, orange and red as they tire.
   const heat = (e) => (e >= 75 ? '' : e >= 65 ? 'h1' : e >= 55 ? 'h2' : e >= 40 ? 'h3' : 'h4');
-  const freshTile = (p, small) => { const e = Math.round(stats().get(p.id).energy); return `<span class="tile ${mixed() ? p.match : ''} ${heat(e)} ${small ? 'sm' : ''}" title="Energy ${e} of 100" aria-label="Energy ${e} of 100">${e}</span>`; };
+  const freshTile = (p, small, ring) => { const e = Math.round(stats().get(p.id).energy); return `<span class="tile ${mixed() ? p.match : ''} ${heat(e)} ${small ? 'sm' : ''} ${ring ? 'pull-ring' : ''}" title="Energy ${e} of 100" aria-label="Energy ${e} of 100">${e}</span>`; };
   const nameTag = (p) => `${p.no ? `<span class="no">#${esc(p.no)}</span> ` : ''}${esc(p.name)}`;
   const energyKey = '<span class="small muted" title="100 is fully rested. Yellow, orange and red mean tiring.">Badge is energy, out of 100</span>';
   const ratingTip = (p) => allSkills().map(([k, l]) => `${l} ${E.rate(p, k)}`).join(', ');
@@ -216,10 +220,13 @@
       return `<span class="ev stat e-${kind}" ${attrs}>${Report.label({ t: kind, sub: it.sub })}: ${whoName(it.id)}${q}</span>`;
     }).join('<span class="muted arrow"> → </span>');
   }
+  const isPuller = (p) => p.tags.some((t) => t.toLowerCase() === 'puller');
+  // Before the pull: Puller-tagged players get a ring, and a hold on a line card picks who pulls.
+  const pullOpen = () => { const g = G(); return g.live ? g.live.on === 'D' && !g.live.puller && !g.live.review && !(g.live.events || []).length : ctx().on === 'D'; };
   function lineCard(id, pos) {
-    const p = P(id), def = POS(pos), rating = def ? E.rate(p, def.skill) : '';
-    return `<button type="button" class="pc ${sel === id ? 'sel' : ''}" data-a="tap-line" data-id="${id}" data-drag="${id}">
-      ${freshTile(p)}<span class="nm"><span class="tx">${nameTag(p)}</span></span>
+    const p = P(id), def = POS(pos), rating = def ? E.rate(p, def.skill) : '', pull = pullOpen();
+    return `<button type="button" class="pc ${sel === id ? 'sel' : ''}" data-a="tap-line" data-id="${id}" data-drag="${id}" ${pull ? `data-press="${id}"` : ''}>
+      ${freshTile(p, false, pull && isPuller(p))}<span class="nm"><span class="tx">${nameTag(p)}</span></span>
       <span class="sub">${matchBadge(p)}<span class="meta"><span ${tipAttr(ratingTip(p))}>${esc(posName(pos))} ${rating}</span></span></span></button>`;
   }
   function benchRow(id, live) {
@@ -236,14 +243,14 @@
   function strength(line) {
     return `<div class="strength">${line.strength.map((v) => `<div class="st" ${tipAttr(`${v.label}: this line averages ${v.line.toFixed(1)}. The tick is your available team at ${v.team.toFixed(1)}.`)}><div class="row"><span>${esc(v.label)}</span><b>${v.line.toFixed(1)}</b></div><div class="meter"><i style="width:${v.line / 5 * 100}%"></i><u style="left:${v.team / 5 * 100}%"></u></div></div>`).join('')}</div>`;
   }
-  const legend = () => (mixed() ? `<span class="legend small"><span class="tile W sm" aria-hidden="true"></span>WMP <span class="tile M sm" aria-hidden="true"></span>MMP</span>` : '');
+  const legend = () => (mixed() ? `<span class="legend small"><span class="tile W sm" aria-hidden="true"></span>${GL('W')} <span class="tile M sm" aria-hidden="true"></span>${GL('M')}</span>` : '');
 
   /* ---------- Game screens ---------- */
   function scoreboard(live) {
     const g = G(), sc = E.score(g), c = live ? { on: g.live.on, ratio: g.live.ratio, pointNo: g.points.length + 1, halftime: false } : ctx();
     const onLabel = c.on === 'O' ? 'Offense' : 'Defense';
     const major = Math.ceil(S.rules.size / 2), minor = Math.floor(S.rules.size / 2);
-    const ratioLabel = c.ratio && (c.ratio === 'W' ? `${major} women / ${minor} men` : `${major} men / ${minor} women`);
+    const ratioLabel = c.ratio && (c.ratio === 'W' ? `${major} ${GW('W')} / ${minor} ${GW('M')}` : `${major} ${GW('M')} / ${minor} ${GW('W')}`);
     const atEnd = Math.max(sc.us, sc.them) >= S.rules.gameTo;
     return `<section class="score" aria-label="Score">
       <div class="nums"><div class="side"><b>${sc.us}</b><span class="team">${esc(S.team)}</span></div><span class="dash">–</span><div class="side"><b>${sc.them}</b><span class="team">${esc(g.opponent || 'Opponent')}</span></div></div>
@@ -251,6 +258,7 @@
         <span class="label">Point ${c.pointNo}</span>
         ${live ? `<span class="chip on${c.on}">${onLabel}</span>` : `<button type="button" class="chip on${c.on}" data-a="flip-on" aria-label="Next point is ${onLabel}. Tap to switch.">${onLabel} ⇄</button>`}
         ${c.ratio ? (live ? `<span class="chip">${ratioLabel}</span>` : `<button type="button" class="chip" data-a="flip-ratio">${ratioLabel}${S.rules.ratioMode === 'abba' ? '' : (S.rules.ratioMode === 'call' ? c.on === 'O' : c.caller === 'us') ? ' · we call' : ' · they call'} ⇄</button>`) : ''}
+        ${!live && gendzone() && !g.points.length ? `<button type="button" class="chip" data-a="gendzone-first" data-v="${g.gendzoneUs === false ? 'us' : 'them'}" aria-label="Tap to switch who starts in the gendzone">${g.gendzoneUs === false ? 'They' : 'We'} start in the gendzone ⇄</button>` : ''}
         ${c.halftime ? '<span class="chip">After halftime</span>' : ''}
       </div>
       <div class="right">
@@ -343,6 +351,7 @@
   }
 
   const role = () => Root.gameRole || 'both';
+  const gendzone = () => S.rules.division === 'mixed' && S.rules.ratioMode === 'gendzone';
   function draftScreen() {
     const g = G(), line = placedLine(), ids = placedIds(), target = targetSize();
     const rest = S.players.filter((p) => !g.out[p.id] && !g.draft.line[p.id]).map((p) => p.id);
@@ -358,7 +367,7 @@
           ${voiceBox()}
           ${positionGroups()}
           ${line ? strength(line) : ''}
-          ${line && line.warnings.length ? `<div class="warns" role="status"><b>Check this line</b>${line.warnings.map((w) => `<span>${esc(w)}</span>`).join('')}</div>` : ''}
+          ${line && line.warnings.length ? `<div class="warns" role="status"><b>Check this line</b>${line.warnings.map((w) => `<span>${esc(gWords(w))}</span>`).join('')}</div>` : ''}
         </section>
         ${role() === 'events' ? '' : suggestionPanel()}
         <div class="sticky-go">${selectionBar()}<button type="button" class="btn go" data-a="start-point" ${missing || !ids.length ? 'disabled' : ''}>${!target ? 'No players available' : missing ? `Pick ${missing} more` : 'Start point'}</button></div>
@@ -388,13 +397,14 @@
     const p = P(id), s = stats().get(id), pos = (activePt().roles || {})[id];
     const counts = [['touch', 'T', 'Touches'], ['goal', 'G', 'Goals'], ['assist', 'A', 'Assists'], ['turn', 'TO', 'Turnovers'], ['block', 'B', 'Blocks']].filter(([k]) => liveCount(id, k) > 0);
     return `<button type="button" class="pc onfield ${sel === id ? 'sel' : ''}" data-a="tap-field" data-id="${id}" data-press="${id}">
-      ${freshTile(p)}<span class="nm"><span class="tx">${nameTag(p)}</span></span>
+      ${freshTile(p, false, editIdx === null && pullOpen() && isPuller(p))}<span class="nm"><span class="tx">${nameTag(p)}</span></span>
       <span class="sub">${matchBadge(p)}<span class="meta"><span ${tipAttr(posName(pos))}>${esc(posAbbr(pos))}</span> · ${counts.length ? counts.map(([k, l, name]) => `<span ${tipAttr(`${name} this point`)}><b>${l}${liveCount(id, k)}</b></span>`).join(' ') : 'No touches yet'}</span></span></button>`;
   }
   function chainStrip() {
     const ev = activePt().events || [];
+    const pull = activePt().puller && P(activePt().puller) ? `<span class="ev stat e-pull">Pull: ${whoName(activePt().puller)}</span>${ev.length ? '<span class="muted arrow"> → </span>' : ' '}` : '';
     const items = narrativeHtml(ev, true);
-    return `<div class="chain-row"><div class="chain" aria-live="polite">${items || '<span class="muted">Tap a player for a touch. Hold for goal, assist, turnover or block.</span>'}</div>${ev.length > 1 ? '<span class="small muted chain-hint">Hold and drag to reorder</span>' : ''}${ev.length ? '<button type="button" class="btn small-btn" data-a="undo-stat">Undo</button>' : ''}<button type="button" class="btn small-btn" data-a="voice-open" data-v="play">Voice</button></div>`;
+    return `<div class="chain-row"><div class="chain" aria-live="polite">${pull}${items || '<span class="muted">Tap a player for a touch. Hold for goal, assist, turnover or block.</span>'}</div>${ev.length > 1 ? '<span class="small muted chain-hint">Hold and drag to reorder</span>' : ''}${ev.length ? '<button type="button" class="btn small-btn" data-a="undo-stat">Undo</button>' : ''}<button type="button" class="btn small-btn" data-a="voice-open" data-v="play">Voice</button></div>`;
   }
   function linesLive() {
     const g = G(), pv = getPreviews(), onField = liveOnField().filter(P);
@@ -462,7 +472,8 @@
     <section class="panel"><h2>New game</h2>
       ${next.length ? `<div class="field"><span class="label">Scheduled</span><div class="attend">${next.map((x) => `<button type="button" class="tog" data-a="pick-scheduled" data-id="${x.id}" aria-pressed="${s.scheduleId === x.id}">${esc(longDate(x.date))} vs ${esc(x.opponent)}</button>`).join('')}</div></div>` : ''}
       <div class="form-row"><label class="field grow"><span class="label">Opponent</span><input id="opp" type="text" data-c="setup-opp" value="${esc(s.opponent)}" placeholder="Opponent name" autocomplete="off"></label>
-      <div class="field"><span class="label">First point we play</span>${seg('setup-on', s.startOn, [['O', 'Offense'], ['D', 'Defense']])}</div></div>
+      <div class="field"><span class="label">First point we play</span>${seg('setup-on', s.startOn, [['O', 'Offense'], ['D', 'Defense']])}</div>
+      ${gendzone() ? `<div class="field"><span class="label">Starts in the gendzone</span>${seg('gendzone-first', s.gendzoneUs === false ? 'them' : 'us', [['us', 'Us'], ['them', 'Them']])}</div>` : ''}</div>
       <div class="field"><span class="label">Who's here? ${here} of ${S.players.length}</span><div class="attend">${S.players.map((p) => `<button type="button" class="tog" data-a="setup-out" data-id="${p.id}" aria-pressed="${!s.out[p.id]}">${esc(p.name)}</button>`).join('')}</div></div>
       <button type="button" class="btn go" data-a="start-game" ${here ? '' : 'disabled'}>Start game</button></section>`;
   }
@@ -474,6 +485,7 @@
       <div class="form-row"><label class="field grow"><span class="label">This team's name</span><input id="team-name" type="text" data-c="team" value="${esc(S.team)}" autocomplete="off"></label>
       ${Root.teams.length > 1 && isAdmin() ? twoTap('delteam-' + S.id, 'delete-team', 'Delete team', 'Tap again to delete', 'danger') : ''}</div>
       <form class="form-row" data-form="team"><label class="field grow"><span class="label">New team</span><input id="new-team" type="text" placeholder="Team name" autocomplete="off"></label><button class="btn primary" type="submit">Add team</button></form>
+      <label class="check"><input type="checkbox" data-c="youth" ${S.youth ? 'checked' : ''}> Youth team <span class="small muted">(Gx/Bx instead of WMP/MMP)</span></label>
       <p class="small muted">A new team starts with this team's rules and an empty roster.</p></section>`;
   }
   const longDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
@@ -527,7 +539,7 @@
     return `<div class="scrim" data-a="close-sheet" data-self="1"><div class="sheet" role="dialog" aria-label="Edit ${esc(p.name)}">
       <div class="form-row"><label class="field grow"><span class="label">Name</span><input id="edit-name" type="text" data-c="edit-name" value="${esc(p.name)}" autocomplete="off"></label>
       <label class="field jersey"><span class="label">Jersey</span><input id="edit-no" type="text" inputmode="numeric" data-c="edit-no" value="${esc(p.no)}" autocomplete="off"></label><button type="button" class="btn primary" data-a="close-sheet">Done</button></div>
-      <div class="field"><span class="label">Gender</span>${seg('set-match', p.match, [['M', 'Male (MMP)'], ['W', 'Female (WMP)']])}</div>
+      <div class="field"><span class="label">Gender</span>${seg('set-match', p.match, [['M', S.youth ? 'Boy (Bx)' : 'Male (MMP)'], ['W', S.youth ? 'Girl (Gx)' : 'Female (WMP)']])}</div>
       ${allSkills().map(([k, l]) => `<div class="field"><span class="label">${esc(l)}</span><div class="pips">${[1, 2, 3, 4, 5].map((v) => `<button type="button" data-a="set-skill" data-k="${k}" data-v="${v}" aria-pressed="${E.rate(p, k) === v}">${v}</button>`).join('')}</div></div>`).join('')}
       <div class="field"><span class="label">Tags</span><div class="taglist">${S.rules.tags.map((t) => `<button type="button" class="tog" data-a="toggle-tag" data-v="${esc(t)}" aria-pressed="${p.tags.includes(t)}">${esc(t)}</button>`).join('')}</div></div>
       <div class="field"><span class="label">Playtime target</span>${seg('set-target', p.target, E.TARGETS.map((t) => [t, TARGET_LABEL[t]]))}</div>
@@ -603,7 +615,7 @@
       const opp = ev.filter((e) => e.t === 'oppturn').length;
       const notes = [tally('Throwaways', (e) => e.t === 'turn' && e.sub !== 'drop'), tally('Drops', (e) => e.t === 'turn' && e.sub === 'drop'), tally('Blocks', (e) => e.t === 'block' && e.sub !== 'int'), tally('Interceptions', (e) => e.t === 'block' && e.sub === 'int'), opp ? `<span><b>Opponent turnovers:</b> ${opp}</span>` : ''].join('');
       const chips = p.lineup.filter((id) => P(id)).map((id) => `<span class="sug static">${tile(P(id), true)}<span>${name(id)}</span><span class="tag small muted" ${tipAttr(posName((p.roles || {})[id]))}>${esc(posAbbr((p.roles || {})[id]))}</span></span>`).join('');
-      const events = narrativeHtml(p.events);
+      const events = (p.puller && P(p.puller) ? `<span class="ev stat e-pull">Pull: ${name(p.puller)}</span>${p.events && p.events.length ? '<span class="muted arrow"> → </span>' : ''}` : '') + narrativeHtml(p.events);
       const subs = (p.subs || []).map((s) => `${name(s.in)} in for ${name(s.out)}`).join(', ');
       return `<article class="pp">
         <div class="pg"><span class="pg-no">${i + 1}</span><span class="pg-score ${p.result}">${us} - ${them}</span>
@@ -631,7 +643,7 @@
     const byCutter = (a, b) => cutScore(b) - cutScore(a) || a.name.localeCompare(b.name);
     const inGroup = (fn, order) => S.players.filter(fn).sort(order);
     return mixed()
-      ? [['MMP Handlers', inGroup((p) => isHandler(p) && p.match !== 'W', byHandler)], ['WMP Handlers', inGroup((p) => isHandler(p) && p.match === 'W', byHandler)], ['MMP Cutters', inGroup((p) => !isHandler(p) && p.match !== 'W', byCutter)], ['WMP Cutters', inGroup((p) => !isHandler(p) && p.match === 'W', byCutter)]]
+      ? [[`${GL('M')} Handlers`, inGroup((p) => isHandler(p) && p.match !== 'W', byHandler)], [`${GL('W')} Handlers`, inGroup((p) => isHandler(p) && p.match === 'W', byHandler)], [`${GL('M')} Cutters`, inGroup((p) => !isHandler(p) && p.match !== 'W', byCutter)], [`${GL('W')} Cutters`, inGroup((p) => !isHandler(p) && p.match === 'W', byCutter)]]
       : [['Handlers', inGroup(isHandler, byHandler)], ['Cutters', inGroup((p) => !isHandler(p), byCutter)]];
   }
   function scoresheetScreen(viewSeg) {
@@ -713,8 +725,8 @@
     const bias = mixed() ? Report.targetBias(pts, S.players).filter((b) => b.throws >= 4 && Math.abs(b.gap) >= 0.15).sort((x, y) => Math.abs(y.gap) - Math.abs(x.gap)).slice(0, 3) : [];
     const flagged = new Set(bias.map((b) => b.id));
     const pctOf = (x) => Math.round(x * 100);
-    const biasNote = !mixed() ? '' : bias.length ? `<div class="warns"><b>Biggest gaps in who they throw to</b>${bias.map((b) => `<span>${esc(nameOf(b.id))}: ${b.toW} of ${b.throws} throws to WMPs (${pctOf(b.share)}%), with ${pctOf(b.expected)}% of teammates on the field being WMPs.</span>`).join('')}</div>` : '<p class="small muted">No one stands out yet. A player needs at least 4 logged throws to be compared.</p>';
-    const hmLegend = mixed() ? '<p class="small muted hm-key"><i class="ww"></i> WMP to WMP <i class="mm"></i> MMP to MMP <i class="xx"></i> Cross-matchup</p>' : '';
+    const biasNote = !mixed() ? '' : bias.length ? `<div class="warns"><b>Biggest gaps in who they throw to</b>${bias.map((b) => `<span>${esc(nameOf(b.id))}: ${b.toW} of ${b.throws} throws to ${GL('W')} players (${pctOf(b.share)}%), with ${pctOf(b.expected)}% of teammates on the field being ${GL('W')}.</span>`).join('')}</div>` : '<p class="small muted">No one stands out yet. A player needs at least 4 logged throws to be compared.</p>';
+    const hmLegend = mixed() ? `<p class="small muted hm-key"><i class="ww"></i> ${GL('W')} to ${GL('W')} <i class="mm"></i> ${GL('M')} to ${GL('M')} <i class="xx"></i> Cross-matchup</p>` : '';
     const rowTotal = (a) => [...(passes.get(a) || new Map()).values()].reduce((x, y) => x + y, 0);
     const matrix = ids.length ? `<div class="tbl-wrap"><table class="hm"><thead><tr><th class="hm-name">Thrower ↓ / Receiver →</th>${ids.map((id) => `<th ${tipAttr(nameOf(id))}>${esc(short(id))}</th>`).join('')}<th>Total</th></tr></thead><tbody>${ids.map((a) => `<tr class="${flagged.has(a) ? 'flagged' : ''}"><th class="hm-name">${esc(nameOf(a))}</th>${ids.map((b) => cell(a, b)).join('')}<td class="hm-total">${rowTotal(a)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Log touches during a point and throws show up here.</p>';
     return `<section class="panel">${head}
@@ -831,9 +843,8 @@
         <div class="rl"><span>Game to</span>${stepper('rule', r.gameTo, 1, 25, 'data-k="gameTo"')}</div>
         <div class="rl"><span>Division</span>${seg('division', r.division, [['open', 'Single'], ['mixed', 'Mixed']])}</div>
         ${r.division === 'mixed' ? `<div class="rl"><span>Gender ratio</span>${seg('ratio-mode', r.ratioMode, [['abba', 'ABBA'], ['gendzone', 'Gendzone'], ['call', 'Offense Calls']])}</div>
-        <div class="rl"><span>${r.ratioMode === 'abba' ? 'First point has more' : 'Usually more'}</span>${seg('ratio-start', r.ratioStart, [['W', 'Women'], ['M', 'Men']])}</div>
-        ${r.ratioMode === 'gendzone' ? `<div class="rl"><span>In the gendzone on point 1</span>${seg('gendzone-first', r.gendzoneUs === false ? 'them' : 'us', [['us', 'Us'], ['them', 'Them']])}</div>` : ''}
-        ${r.ratioMode === 'abba' ? '' : '<p class="small muted">Tap the ratio on the Current Game screen to set each point\'s call.</p>'}` : ''}
+        <div class="rl"><span>${r.ratioMode === 'abba' ? 'First point has more' : 'Usually more'}</span>${seg('ratio-start', r.ratioStart, [['W', GW('W', true)], ['M', GW('M', true)]])}</div>
+        ${r.ratioMode === 'abba' ? '' : `<p class="small muted">Tap the ratio on the Current Game screen to set each point's call.${r.ratioMode === 'gendzone' ? ' Who starts in the gendzone is set when you start a game.' : ''}</p>`}` : ''}
         <h3>Playing time</h3>
         <div class="rl"><span>Points anyone can fall behind target</span>${stepper('rule', r.tolerance, 1, 6, 'data-k="tolerance"')}</div>
         <div class="rl"><span>Points in a row before a rest</span>${stepper('rule', r.maxStreak, 1, 6, 'data-k="maxStreak"')}</div>
@@ -854,8 +865,10 @@
   /* ---------- Render ---------- */
   function menuView() {
     if (!menu || !P(menu.id)) return '';
+    const g = G();
+    if (g && !g.live && editIdx === null) return `<div class="menu-scrim" data-a="menu-close" data-self="1"><div class="menu" id="stat-menu" style="left:${menu.x}px;top:${menu.y}px" role="menu" aria-label="${esc(P(menu.id).name)}"><div class="label">${esc(P(menu.id).name)}</div><button type="button" data-a="puller" role="menuitem">Puller (starts the point)</button></div></div>`;
     return `<div class="menu-scrim" data-a="menu-close" data-self="1"><div class="menu" id="stat-menu" style="left:${menu.x}px;top:${menu.y}px" role="menu" aria-label="${esc(P(menu.id).name)}"><div class="label">${esc(P(menu.id).name)}</div>
-      ${STAT_MENU.map(([t, sub, l]) => `<button type="button" data-a="stat" data-v="${t}" data-sub="${sub}" role="menuitem">${l}</button>`).join('')}
+      ${editIdx === null && pullOpen() ? '<button type="button" data-a="puller" role="menuitem">Puller</button>' : ''}${STAT_MENU.map(([t, sub, l]) => `<button type="button" data-a="stat" data-v="${t}" data-sub="${sub}" role="menuitem">${l}</button>`).join('')}
       ${editIdx === null ? '<button type="button" data-a="menu-sub" role="menuitem">Sub out</button>' : ''}</div></div>`;
   }
   function settingsSheet() {
@@ -1125,11 +1138,19 @@
     mode(d) { commit(() => { G().mode = d.v; G().draft.alt = 0; G().draft.plan = null; }); },
     'flip-on'() { commit(() => { const d = G().draft; d.on = ctx().on === 'O' ? 'D' : 'O'; d.alt = 0; d.plan = null; d.line = {}; }); },
     'flip-ratio'() { commit(() => { const d = G().draft; d.ratio = ctx().ratio === 'W' ? 'M' : 'W'; d.alt = 0; d.plan = null; }); },
-    'start-point'() {
+    'start-point'(d) {
       const c = ctx(), g = G(), line = { ...g.draft.line };
       stopVoice();
-      commit(() => { g.live = { lineup: Object.keys(line), roles: line, on: c.on, ratio: c.ratio, startedAt: Date.now(), avail: S.players.filter((p) => !g.out[p.id]).map((p) => p.id), subs: [], events: [] }; sel = null; voice = null; });
+      commit(() => { g.live = { lineup: Object.keys(line), roles: line, on: c.on, ratio: c.ratio, startedAt: Date.now(), puller: (d && d.puller) || null, avail: S.players.filter((p) => !g.out[p.id]).map((p) => p.id), subs: [], events: [] }; sel = null; voice = null; });
       if (openMic) startOpenMic();
+    },
+    puller() {
+      const id = menu.id, g = G();
+      menu = null;
+      if (g.live) return commit(() => { g.live.puller = id; });
+      const missing = targetSize() - placedIds().length;
+      if (missing > 0) { render(); return flash(`Pick ${missing} more before the pull.`); }
+      A['start-point']({ puller: id });
     },
     'cancel-point'() { stopVoice(); commit(() => { G().live = null; sel = null; voice = null; }); },
     result(d) {
@@ -1242,7 +1263,7 @@
     },
     'setup-on'(d) { commit(() => { S.setup.startOn = d.v; }); },
     'setup-out'(d) { commit(() => { if (S.setup.out[d.id]) delete S.setup.out[d.id]; else S.setup.out[d.id] = true; }); },
-    'start-game'() { commit(() => { const s = S.setup; S.game = { id: uid(), scheduleId: s.scheduleId || null, opponent: s.opponent, startOn: s.startOn, mode: 'balanced', out: { ...s.out }, startedAt: Date.now(), points: [], live: null, draft: newDraft() }; }); },
+    'start-game'() { commit(() => { const s = S.setup; S.game = { id: uid(), scheduleId: s.scheduleId || null, opponent: s.opponent, startOn: s.startOn, gendzoneUs: s.gendzoneUs !== false, mode: 'balanced', out: { ...s.out }, startedAt: Date.now(), points: [], live: null, draft: newDraft() }; }); },
     edit(d) { uiChange(() => { editing = d.id; }); },
     'close-sheet'() { uiChange(() => { editing = null; }); },
     cycle(d) { commit(() => { const p = P(d.id), v = E.rate(p, d.k); p[d.k] = v >= 5 ? 1 : v + 1; }); },
@@ -1324,7 +1345,7 @@
     'del-pos'(d) { commit(() => { S.rules.positions.splice(Number(d.i), 1); redraft(); }); },
     division(d) { commit(() => { S.rules.division = d.v; redraft(); }); },
     'ratio-mode'(d) { commit(() => { S.rules.ratioMode = d.v; redraft(); }); },
-    'gendzone-first'(d) { commit(() => { S.rules.gendzoneUs = d.v === 'us'; redraft(); }); },
+    'gendzone-first'(d) { commit(() => { if (S.game) { S.game.gendzoneUs = d.v === 'us'; redraft(); } else S.setup.gendzoneUs = d.v === 'us'; }); },
     'ratio-start'(d) { commit(() => { S.rules.ratioStart = d.v; redraft(); }); },
     tagrule(d) { commit(() => { const t = S.rules.tagRules[d.i]; if (d.k === 'min') t.min = (t.min || 0) + Number(d.d); else { const cur = t.max === null ? S.rules.size : t.max; const nx = cur + Number(d.d); t.max = nx >= S.rules.size ? null : nx; } redraft(); }); },
     'tagrule-when'(d) { commit(() => { const t = S.rules.tagRules[d.i]; t.when = t.when === 'all' ? 'O' : t.when === 'O' ? 'D' : 'all'; redraft(); }); },
@@ -1396,6 +1417,7 @@
       if (best) { best.el.classList.add(best.side === 'before' ? 'ins-before' : 'ins-after'); dragging.to = Number(best.el.dataset.evi); dragging.side = best.side; }
       return;
     }
+    if (dragging.sx !== undefined && Math.hypot(x - dragging.sx, y - dragging.sy) > 10) dragging.moved = true;
     const under = document.elementFromPoint(x, y);
     const zone = under && under.closest('[data-drop]');
     if (dragging.zone !== zone) {
@@ -1416,6 +1438,7 @@
     }
     if (d.zone) d.zone.classList.remove('drop-on');
     suppress();
+    if (apply && d.press && !d.moved && Date.now() - d.at >= 450) { openMenu(d.press, d.sx, d.sy); return; }
     if (!apply || !d.zone) return;
     const cardEl = d.under && d.under.closest('.pc[data-id]');
     dropPlayer(d.id, d.zone.dataset.drop, cardEl ? cardEl.dataset.id : null);
@@ -1427,10 +1450,10 @@
     if (e.target.closest('[data-tip],.sit')) return;
     const el = e.target.closest('[data-press],[data-drag]');
     if (!el) return;
-    g0 = { el, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', press: el.dataset.press, drag: el.dataset.drag, timer: null };
+    g0 = { el, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', press: el.dataset.press, drag: el.dataset.drag, timer: null, at: Date.now() };
     const start = g0;
-    if (start.press) start.timer = setTimeout(() => { g0 = null; suppress(); openMenu(start.press, start.x, start.y); }, 450);
-    else if (!start.mouse) start.timer = setTimeout(() => { g0 = null; beginDrag(start.drag, start.x, start.y, start.el); if (navigator.vibrate) try { navigator.vibrate(12); } catch (x) { /* optional */ } }, 220);
+    if (start.press && (start.mouse || !start.drag)) start.timer = setTimeout(() => { g0 = null; suppress(); openMenu(start.press, start.x, start.y); }, 450);
+    else if (!start.mouse) start.timer = setTimeout(() => { g0 = null; beginDrag(start.drag, start.x, start.y, start.el); if (dragging) Object.assign(dragging, { press: start.press, at: start.at, sx: start.x, sy: start.y }); if (navigator.vibrate) try { navigator.vibrate(12); } catch (x) { /* optional */ } }, 220);
   });
   document.addEventListener('pointermove', (e) => {
     if (dragging) { moveDrag(e.clientX, e.clientY); return; }
@@ -1476,6 +1499,7 @@
     }
     if (key === 'points-src') uiChange(() => { pointsSource = v; });
     if (key === 'team' && v.trim()) commit(() => { S.team = v.trim(); });
+    if (key === 'youth') commit(() => { S.youth = ev.target.checked; });
     if (key === 'pos-name' && v.trim()) commit(() => { const p = S.rules.positions[i]; p.name = v.trim(); p.abbr = makeAbbr(p.name, p.id); });
     if (key === 'pos-skill') commit(() => { const p = S.rules.positions[i]; p.skill = v === 'own' ? 'x_' + p.id : v; });
   });

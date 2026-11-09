@@ -158,7 +158,7 @@ const Engine = (() => {
     }
     // Gendzone: the team starting in that endzone picks the ratio, and teams change ends every point.
     let caller = null;
-    if (rules.division === 'mixed' && rules.ratioMode === 'gendzone') caller = (rules.gendzoneUs !== false) === (n % 2 === 0) ? 'us' : 'them';
+    if (rules.division === 'mixed' && rules.ratioMode === 'gendzone') caller = ((game.gendzoneUs !== undefined ? game.gendzoneUs : rules.gendzoneUs) !== false) === (n % 2 === 0) ? 'us' : 'them';
     if (rules.division === 'mixed' && rules.ratioMode === 'call') caller = on === 'O' ? 'us' : 'them';
     return { on, ratio, caller, halftime, pointNo: n + 1, minLeft: Math.max(1, rules.gameTo - Math.max(us, them)) };
   }
