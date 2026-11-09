@@ -357,5 +357,39 @@ for (const [n, mixed, mode] of [[12, false, 'balanced'], [14, false, 'develop'],
   check(!vocab.includes('t') && new Set(vocab).size === vocab.length && !vocab.includes('oppturn'), 'vocabulary is clean');
 }
 
+// Implied opponent turnovers and reordering.
+{
+  const ev = [];
+  [['touch', 'a'], ['turn', 'a'], ['touch', 'b'], ['touch', 'c']].forEach(([t, id]) => E.addEvent(ev, { t, id }, 1));
+  check(ev.map((e) => e.t).join() === 'touch,turn,oppturn,touch,touch', 'turnover then our touch implies opponent turnover: ' + ev.map((e) => e.t));
+  const blocked = [];
+  [['touch', 'a'], ['turn', 'a'], ['block', 'b'], ['touch', 'b']].forEach(([t, id]) => E.addEvent(blocked, { t, id }, 1));
+  check(!blocked.some((e) => e.t === 'oppturn'), 'a block needs no implied turnover');
+
+  const pts = [];
+  ['a', 'b', 'c'].forEach((id) => E.addEvent(pts, { t: 'touch', id }, 1));
+  E.addEvent(pts, { t: 'goal', id: 'c' }, 2);
+  E.addEvent(pts, { t: 'touch', id: 'z' }, 3);
+  // Drag z between b and c: z becomes the assist.
+  const z = pts.pop();
+  const scorerAt = pts.findIndex((e) => e.t === 'touch' && e.id === 'c');
+  const moved = pts.slice(0, scorerAt).concat(z, pts.slice(scorerAt));
+  const again = E.reflow(moved);
+  check(again.filter((e) => e.t === 'assist').map((e) => e.id).join() === 'z', 'assist follows the new order: ' + JSON.stringify(again.map((e) => e.t + ':' + e.id)));
+}
+
+// A name that only fits a bench player is matched to the bench.
+{
+  const field = ['Jimmy', 'Mickey'].map((name, i) => ({ id: 'f' + i, name, no: '', aliases: '' }));
+  const bench = ['Robin', 'Mickael'].map((name, i) => ({ id: 'b' + i, name, no: '', aliases: '' }));
+  const r = E.parsePlay('Jimmy to Robin', field, { bench });
+  check(r.events.map((e) => e.id).join() === 'f0,b0', 'bench player matched: ' + r.events.map((e) => e.id));
+  const r2 = E.parsePlay('Mickey to Jimmy', field, { bench });
+  check(r2.events[0].id === 'f1', 'field player preferred');
+  const hold = E.parseLine('Handlers', field, E.defaultPositions());
+  check(hold.lastPos === 'H', 'a heading on its own is remembered');
+  check(E.parseLine('Jimmy, Mickey', field, E.defaultPositions(), { pos: 'H' }).assign.every((a) => a.pos === 'H'), 'names land under the remembered heading');
+}
+
 console.log(failures ? failures + ' FAILURES' : 'All checks passed');
 process.exit(failures ? 1 : 0);

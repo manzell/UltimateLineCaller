@@ -515,7 +515,8 @@ const Engine = (() => {
   const fresh = (energy) => (energy >= 70 ? 'Fresh' : energy >= 40 ? 'OK' : 'Tired');
 
   /* ---------- Touch log ---------- */
-  const BREAKS = new Set(['turn', 'block', 'goal', 'oppturn']);
+  const BREAKS = new Set(['turn', 'block', 'goal', 'oppturn', 'oppgoal']);
+  const NEEDS_DISC = new Set(['touch', 'assist', 'goal']);
   function chainOf(events) {
     const out = [];
     for (let i = events.length - 1; i >= 0; i--) {
@@ -526,6 +527,9 @@ const Engine = (() => {
   }
   // Adds one stat. A goal credits the scorer with a touch and the previous thrower with the assist.
   function addEvent(events, ev, at) {
+    const before = events[events.length - 1];
+    // We turned it over and now we have it again, so the other team must have given it back.
+    if (before && before.t === 'turn' && NEEDS_DISC.has(ev.t)) events.push({ t: 'oppturn', at, implicit: true });
     const chain = chainOf(events);
     const touches = chain.filter((e) => e.t === 'touch');
     const lastTouch = touches[touches.length - 1];
@@ -545,12 +549,31 @@ const Engine = (() => {
       if (!lastTouch || lastTouch.id !== ev.id) events.push({ t: 'touch', id: ev.id, at });
       if (!hasAssist && prior) {
         const thrower = lastTouch && lastTouch.id !== ev.id ? lastTouch.id : prior.id;
-        events.push({ t: 'assist', id: thrower, at });
+        events.push({ t: 'assist', id: thrower, at, auto: true });
       }
       events.push({ t: 'goal', id: ev.id, at });
       return;
     }
     events.push({ t: ev.t, id: ev.id, at });
+  }
+
+  // Rebuilds what the app filled in by itself after the coach reorders a point.
+  function reflow(events) {
+    const out = [];
+    for (const ev of events) {
+      if (ev.implicit || ev.auto) continue;
+      const last = out[out.length - 1];
+      if (last && last.t === 'turn' && NEEDS_DISC.has(ev.t)) out.push({ t: 'oppturn', at: ev.at, implicit: true });
+      if (ev.t === 'goal') {
+        const chain = chainOf(out);
+        if (!chain.some((x) => x.t === 'assist')) {
+          const prior = chain.filter((x) => x.t === 'touch' && x.id !== ev.id).pop();
+          if (prior) out.push({ t: 'assist', id: prior.id, at: ev.at, auto: true });
+        }
+      }
+      out.push(ev);
+    }
+    return out;
   }
 
   /* ---------- Understanding speech ---------- */
@@ -621,7 +644,7 @@ const Engine = (() => {
       if (best && best.score === 1) break;
     }
     if (!best) return null;
-    return { id: best.p.id, w: best.w, unsure: best.score < 0.8 || second >= best.score - 0.03 };
+    return { id: best.p.id, w: best.w, score: best.score, unsure: best.score < 0.8 || second >= best.score - 0.03 };
   }
 
   // "number twelve", "number twenty one" or "number 21".
@@ -686,10 +709,15 @@ const Engine = (() => {
     for (let i = 0; i < tokens.length;) {
       const t = tokens[i];
       if (t === 'number') {
-        const j = jerseyAt(tokens, i + 1, players);
+        const j = jerseyAt(tokens, i + 1, players.concat((opts && opts.bench) || []));
         if (j) { seq.push({ k: 'p', id: j.p.id, via: viaTo, by: viaBy, unsure: false }); viaTo = viaBy = false; i += 1 + j.w; continue; }
       }
-      const m = mentionAt(tokens, i, players, blocked);
+      // Prefer someone on the field. Only a clearly better match pulls a bench player in.
+      let m = mentionAt(tokens, i, players, blocked);
+      if (opts && opts.bench) {
+        const off = mentionAt(tokens, i, opts.bench, blocked);
+        if (off && (!m || off.score > m.score + 0.05)) m = off;
+      }
       if (m && !(KW.has(t) && m.w === 1 && !players.some((p) => variantsOf(p).includes(t)))) {
         seq.push({ k: 'p', id: m.id, via: viaTo, by: viaBy, from: viaFrom, unsure: m.unsure });
         viaTo = viaBy = viaFrom = false; i += m.w; continue;
@@ -752,7 +780,7 @@ const Engine = (() => {
   }
 
   // "Handlers Ari, Bea, Cal. Cutters Dee, Fen." or "Swap Bea for Cal" or just seven names.
-  function parseLine(text, players, positions) {
+  function parseLine(text, players, positions, opts) {
     const tokens = prepareLine(text);
     const posWords = new Map();
     positions.forEach((p) => { const n = clean(p.name); posWords.set(n, p.id); posWords.set(n + 's', p.id); });
@@ -773,7 +801,7 @@ const Engine = (() => {
       if (CMD.has(t)) { seq.push({ k: CMD.get(t) }); i++; continue; }
       let pos = posWords.get(t);
       if (!pos && t.length >= 4) for (const [w, id] of posWords) if (similar(t, w) >= 0.82) { pos = id; break; }
-      if (pos) { seq.push({ k: 'pos', id: pos }); i++; continue; }
+      if (pos) { seq.push({ k: 'pos', id: pos }); out.lastPos = pos; i++; continue; }
       if (!STOP.has(t) && t.length >= 3) unknown.push(t);
       i++;
     }
@@ -791,7 +819,7 @@ const Engine = (() => {
     const firstP = rest.findIndex((x) => x.k === 'p'), firstPos = rest.findIndex((x) => x.k === 'pos');
     const headingFirst = firstPos >= 0 && (firstP < 0 || firstPos < firstP);
     const push = (it, pos) => { if (!out.assign.some((a) => a.id === it.id)) out.assign.push({ id: it.id, pos, unsure: it.unsure }); };
-    if (firstPos < 0) rest.forEach((it) => push(it, null));
+    if (firstPos < 0) rest.forEach((it) => push(it, (opts && opts.pos) || null));
     else if (headingFirst) { let cur = null; rest.forEach((it) => { if (it.k === 'pos') cur = it.id; else push(it, cur); }); } else {
       let pending = [];
       rest.forEach((it) => { if (it.k === 'p') pending.push(it); else { pending.forEach((x) => push(x, it.id)); pending = []; } });
@@ -800,6 +828,6 @@ const Engine = (() => {
     return out;
   }
 
-  return { MIN, MAX_POSITIONS, TARGETS, defaultRules, defaultPositions, rate, replay, score, context, suggest, evaluate, preview, fresh, shares, limitsFor, skillLabel, addEvent, chainOf, profileMatch, speechVocabulary, parsePlay, parseLine, minPointsOf };
+  return { MIN, MAX_POSITIONS, TARGETS, defaultRules, defaultPositions, rate, replay, score, context, suggest, evaluate, preview, fresh, shares, limitsFor, skillLabel, addEvent, reflow, chainOf, profileMatch, speechVocabulary, parsePlay, parseLine, minPointsOf };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

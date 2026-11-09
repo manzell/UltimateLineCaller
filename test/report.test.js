@@ -57,6 +57,15 @@ check(box.includes('3 (1/2)'), 'points shown as total (O/D)');
   check(![...Report.totals([pt(['a'], 'O', 'us', [{ t: 'oppturn' }])]).keys()].includes(undefined), 'opponent turnover not credited');
 }
 
+// Assists and goals are shown on their touches.
+{
+  const n = Report.narrative([touch('a'), touch('b'), touch('c'), { t: 'assist', id: 'b' }, { t: 'goal', id: 'c' }]);
+  check(n.map((x) => x.id + (x.role ? ':' + x.role : '')).join() === 'a,b:assist,c:goal', 'narrative merge');
+  check(n[2].idxs.join() === '2,4', 'merged item keeps its events');
+  const opp = Report.narrative([touch('a'), { t: 'oppgoal' }]);
+  check(opp.length === 2 && opp[1].t === 'oppgoal', 'opponent goal is its own item');
+}
+
 // A player's own record.
 {
   const s = Report.playerSummary(points, 'a');

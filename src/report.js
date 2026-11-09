@@ -3,7 +3,7 @@
 const Report = (() => {
   const esc = (s) => String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const clock = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
-  const STAT_LABEL = { goal: 'Goal', assist: 'Assist', turn: 'Turnover', block: 'Block', oppturn: 'Opponent turnover' };
+  const STAT_LABEL = { goal: 'Goal', assist: 'Assist', turn: 'Turnover', block: 'Block', oppturn: 'Opponent turnover', oppgoal: 'Opponent goal' };
   const blank = () => ({ played: 0, O: 0, D: 0, touch: 0, goal: 0, assist: 0, turn: 0, block: 0 });
   const onField = (pt) => [...new Set(pt.lineup.concat((pt.subs || []).map((s) => s.in)))];
 
@@ -72,6 +72,22 @@ const Report = (() => {
     return out;
   }
 
+  // The play as people read it: an assist or goal is shown on the touch it belongs to.
+  function narrative(events) {
+    const items = [];
+    (events || []).forEach((e, i) => {
+      if (e.t === 'assist' || e.t === 'goal') {
+        for (let j = items.length - 1; j >= 0; j--) {
+          const it = items[j];
+          if (it.t === 'touch' && it.id === e.id && !it.role) { it.role = e.t; it.idxs.push(i); return; }
+          if (it.t !== 'touch') break;
+        }
+      }
+      items.push({ t: e.t, id: e.id, unsure: e.unsure, idxs: [i] });
+    });
+    return items;
+  }
+
   function subsetsOf(ids, size, emit) {
     const walk = (start, cur) => {
       if (cur.length === size) { emit(cur.join('|')); return; }
@@ -137,7 +153,7 @@ const Report = (() => {
     return points.map((p, i) => {
       p.result === 'us' ? us++ : them++;
       const line = p.lineup.filter((id) => byId.has(id)).map((id) => `${name(id)}${abbr((p.roles || {})[id]) ? ` <small>${esc(abbr(p.roles[id]))}</small>` : ''}`).join(', ');
-      const events = (p.events || []).map((e) => (e.t === 'touch' ? name(e.id) : e.t === 'oppturn' ? `<b class="e-oppturn">${STAT_LABEL.oppturn}</b>` : `<b class="e-${e.t}">${STAT_LABEL[e.t]}: ${name(e.id)}</b>`)).join(' → ');
+      const events = narrative(p.events).map((it) => (it.t === 'touch' && !it.role ? name(it.id) : !it.id ? `<b class="e-${it.t}">${STAT_LABEL[it.t]}</b>` : `<b class="e-${it.role || it.t}">${STAT_LABEL[it.role || it.t]}: ${name(it.id)}</b>`)).join(' → ');
       return `<div class="rp-pt"><p><strong>Point ${i + 1}</strong> · ${p.on === 'O' ? 'Offense' : 'Defense'} · ${p.result === 'us' ? 'We scored' : 'They scored'} · ${us}–${them} · ${clock(p.endedAt - p.startedAt)}</p><p>${line}</p>${events ? `<p class="rp-chain">${events}</p>` : ''}</div>`;
     }).reverse().join('');
   }
@@ -164,7 +180,7 @@ const Report = (() => {
 .bx-box .bx-name { min-width: 120px; padding-right: 14px; }
 .bx tfoot td { font-weight: 700; border-top: 2px solid var(--ink); }
 .rp-chain b { padding: 0 5px; border-radius: 3px; color: #ffffff; font-weight: 700; }
-.rp-chain .e-goal { background: #0b7a3e; } .rp-chain .e-assist { background: #1565c0; } .rp-chain .e-turn { background: #c62828; } .rp-chain .e-block { background: #7b3fb3; } .rp-chain .e-oppturn { background: #8a6400; }
+.rp-chain .e-goal { background: #0b7a3e; } .rp-chain .e-assist { background: #1565c0; } .rp-chain .e-turn { background: #c62828; } .rp-chain .e-block { background: #7b3fb3; } .rp-chain .e-oppturn, .rp-chain .e-oppgoal { background: #8a6400; }
 .rp { --break: #d31027; --ink: #11183a; --muted: #4c5577; --line: #c4cce0; --accent: #2632c9; --on-accent: #ffffff; color: var(--ink); background: #ffffff; font: 16px/1.4 system-ui, -apple-system, Roboto, sans-serif; }
 .rp h1 { font-size: 1.75rem; margin: 0 0 4px; }
 .rp h2 { font-size: 1.375rem; margin: 28px 0 8px; padding-top: 12px; border-top: 2px solid var(--ink); }
@@ -217,6 +233,6 @@ const Report = (() => {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(team.team)} stats</title><style>${CSS}body{margin:0}</style></head><body class="rp">${fragment(team)}</body></html>`;
   }
 
-  return { CSS, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
+  return { CSS, narrative, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
 })();
 if (typeof module !== 'undefined') module.exports = Report;

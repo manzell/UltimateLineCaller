@@ -16,7 +16,7 @@
   const newPlayer = (name, f) => ({ id: uid(), name, no: '', aliases: '', match: 'M', h: 3, c: 3, d: 3, s: 3, tags: [], target: 'average', minPts: 2, contacts: [], ...f });
 
   let Root = null, S = null, tab = 'game', sel = null, editing = null, seasonView = false, ptView = 'time', pointsSource = 'current', backupText = '', notice = '';
-  let playerOpen = null, openMic = false;
+  let playerOpen = null, openMic = false, fixLine = false;
   let editIdx = null, settingsOpen = false, matchResult = null;
   let comboSize = '2', sendFor = null, reportNote = '', downloads = null;
   let memo = null, previews = null, confirmKey = null, confirmTimer = null, menu = null, voice = null;
@@ -204,6 +204,16 @@
 
   const whoName = (id) => (P(id) ? esc(P(id).name) : 'Removed player');
   const evChip = (e, suffix) => (e.t === 'touch' ? `<span class="ev">${whoName(e.id)}${suffix || ''}</span>` : e.t === 'oppturn' ? '<span class="ev stat e-oppturn">Opponent turnover</span>' : `<span class="ev stat e-${e.t}">${STAT_LABEL[e.t]}: ${whoName(e.id)}${suffix || ''}</span>`);
+  function narrativeHtml(events, drag, suffix) {
+    return Report.narrative(events).map((it, i) => {
+      const attrs = drag ? `data-drag="ev:${i}" data-evi="${i}"` : '';
+      const q = suffix && it.unsure ? ' ?' : '';
+      if (it.t === 'touch' && !it.role) return `<span class="ev" ${attrs}>${whoName(it.id)}${q}</span>`;
+      if (!it.id) return `<span class="ev stat e-${it.t}" ${attrs}>${it.t === 'oppgoal' ? 'Opponent goal' : 'Opponent turnover'}</span>`;
+      const kind = it.role || it.t;
+      return `<span class="ev stat e-${kind}" ${attrs}>${STAT_LABEL[kind]}: ${whoName(it.id)}${q}</span>`;
+    }).join('<span class="muted arrow"> → </span>');
+  }
   function lineCard(id, pos) {
     const p = P(id), def = POS(pos), rating = def ? E.rate(p, def.skill) : '';
     return `<button type="button" class="pc ${sel === id ? 'sel' : ''}" data-a="tap-line" data-id="${id}" data-drag="${id}">
@@ -266,9 +276,10 @@
   function selectionBar() {
     if (!sel || !P(sel)) return '';
     const p = P(sel), g = G();
-    if (g.live) {
+    if (g.live || editIdx !== null) {
       const onField = liveOnField().includes(sel);
-      return `<div class="selbar"><p><strong>${esc(p.name)}</strong> selected. ${onField ? 'Tap a bench player to sub them in.' : 'Tap a player on the field to sub out.'}</p><button type="button" class="btn small-btn" data-a="clear-sel">Cancel</button></div>`;
+      const help = fixLine ? (onField ? 'Tap the player who should be in this spot.' : 'Tap the player they should replace.') : (onField ? 'Tap a bench player to sub them in.' : 'Tap a player on the field to sub out.');
+      return `<div class="selbar"><p><strong>${esc(p.name)}</strong> selected. ${help}</p><button type="button" class="btn small-btn" data-a="clear-sel">Cancel</button></div>`;
     }
     const onLine = !!g.draft.line[sel];
     return `<div class="selbar"><p><strong>${esc(p.name)}</strong> selected. ${onLine ? 'Tap a bench player to replace, or another line player to trade spots.' : 'Tap a line player to replace.'}</p>
@@ -295,23 +306,26 @@
     const isPlay = voice.kind === 'play';
     return `<section class="voice" aria-label="Voice">
       <div class="panel-head"><h3>${voice.open ? 'Open mic' : isPlay ? 'Say the play' : 'Say the line'}</h3><button type="button" class="btn small-btn" data-a="voice-close">Close</button></div>
-      <div class="chips">${voice.open ? '<button type="button" class="btn small-btn rec-on" data-a="open-mic">Turn off open mic</button>' : `<button type="button" class="btn small-btn ${voice.listening ? 'rec-on' : 'primary'}" data-a="voice-rec">${voice.listening ? 'Stop' : 'Record'}</button>${isPlay && editIdx === null ? '<button type="button" class="btn small-btn" data-a="open-mic">Open mic</button>' : ''}`}<span class="small muted" id="voice-status" role="status">${esc(voice.status || '')}</span></div>
+      <div class="chips">${voice.open ? '<button type="button" class="btn small-btn rec-on" data-a="open-mic">Turn off open mic</button>' : `<button type="button" class="btn small-btn ${voice.listening ? 'rec-on' : 'primary'}" data-a="voice-rec">${voice.listening ? 'Stop' : 'Record'}</button>${editIdx === null ? '<button type="button" class="btn small-btn" data-a="open-mic">Open mic</button>' : ''}`}<span class="small muted" id="voice-status" role="status">${esc(voice.status || '')}</span></div>
       <textarea id="voice-text" data-c="voice" aria-label="What you said" placeholder="${voice.open ? 'Listening…' : isPlay ? 'Ari throws to Bea, Bea to Cal, Cal to Dee, goal' : 'Handlers Ari, Bea, Cal. Cutters Dee, Fen, Gus, Hana.'}">${esc(voice.text)}</textarea>
-      ${voice.open ? `<p class="small muted">${voice.last ? `Last heard: ${esc(voice.last)}` : 'Talk the way you normally would. Stats add themselves, and a goal ends the point. It stays on for the next point.'}</p>` : `<div id="voice-preview">${voicePreview()}</div>`}</section>`;
+      ${voice.open ? `<p class="small muted">${voice.last ? `Last heard: ${esc(voice.last)}` : (isPlay ? 'Talk the way you normally would. Stats add themselves, and a goal stops the clock so you can review. It stays on for the next point.' : 'Say your line, like "Handlers Ari, Bea. Cutters Dee, Fen." Players go in as you talk.')}</p>` : `<div id="voice-preview">${voicePreview()}</div>`}</section>`;
   }
   function voicePreview() {
     if (!voice || !voice.text.trim()) return '<p class="small muted">Your words appear above. Fix any mistakes before adding them.</p>';
     return voice.kind === 'play' ? playPreview() : linePreview();
   }
   const notes = (unknown) => (unknown.length ? `<p class="small muted">Words not used: ${esc(unknown.join(', '))}. If one is a name, add it under that player's "Sounds like".</p>` : '');
+  const benchNow = () => { const on = liveOnField(); return S.players.filter((p) => !on.includes(p.id) && !G().out[p.id]); };
+  const parseLive = (text, opts) => E.parsePlay(text, liveOnField().filter(P).map(P), { ...opts, bench: benchNow() });
+  const canEndByVoice = () => editIdx === null && G().live && !G().live.review;
   function playPreview() {
-    const r = E.parsePlay(voice.text, liveOnField().map(P));
-    const items = r.events.map((e) => evChip(e, e.unsure ? ' ?' : '')).join('<span class="muted"> → </span>');
+    const r = parseLive(voice.text);
+    const items = narrativeHtml(r.events, false, true);
     const any = r.events.length;
     return `<div class="chain">${items || '<span class="muted">No players recognized yet.</span>'}</div>${r.events.some((e) => e.unsure) ? '<p class="small muted">A ? means the name was a close guess.</p>' : ''}${notes(r.unknown)}
-      <div class="chips">${r.hasGoal && editIdx === null ? '' : `<button type="button" class="btn small-btn" data-a="voice-add" ${any ? '' : 'disabled'}>Add to this point</button>`}
-      ${r.hasGoal && editIdx === null ? '<button type="button" class="btn small-btn primary" data-a="voice-add" data-v="us">Add and we scored</button>' : ''}
-      ${r.theyScored && editIdx === null ? '<button type="button" class="btn small-btn primary" data-a="voice-add" data-v="them">Add and they scored</button>' : ''}</div>`;
+      <div class="chips">${r.hasGoal && canEndByVoice() ? '' : `<button type="button" class="btn small-btn" data-a="voice-add" ${any ? '' : 'disabled'}>Add to this point</button>`}
+      ${r.hasGoal && canEndByVoice() ? '<button type="button" class="btn small-btn primary" data-a="voice-add" data-v="us">Add and we scored</button>' : ''}
+      ${r.theyScored && canEndByVoice() ? '<button type="button" class="btn small-btn primary" data-a="voice-add" data-v="them">Add and they scored</button>' : ''}</div>`;
   }
   const voicePlayers = () => S.players.filter((p) => !G().out[p.id]);
   function linePreview() {
@@ -354,6 +368,13 @@
     </div>`;
   }
 
+  function offFieldNote(pt) {
+    const on = new Set(pt.lineup.concat((pt.subs || []).map((s) => s.in)));
+    const off = [...new Set((pt.events || []).filter((e) => e.id && !on.has(e.id)).map((e) => e.id))].filter(P);
+    if (!off.length) return '';
+    return `<div class="warns" role="status"><b>Check the lineup</b>${off.map((id) => `<span class="off-row">${esc(P(id).name)} has a stat this point but isn't listed on the field. <button type="button" class="btn small-btn" data-a="fix-with" data-id="${id}">Put ${esc(P(id).name)} on the line</button></span>`).join('')}</div>`;
+  }
+  const fixBar = () => (fixLine ? '<div class="selbar"><p><strong>Fixing the lineup.</strong> Tap someone on the field, then who should be there instead. No sub is recorded.</p><button type="button" class="btn small-btn primary" data-a="fix-line">Done fixing</button></div>' : '');
   function compactLine(pv, title) {
     if (!pv.line) return '';
     const onLabel = pv.ctx.on === 'O' ? 'O point' : 'D point';
@@ -369,8 +390,8 @@
   }
   function chainStrip() {
     const ev = activePt().events || [];
-    const items = ev.slice(-16).map((e) => evChip(e)).join('<span class="muted"> → </span>');
-    return `<div class="chain-row"><div class="chain" aria-live="polite">${items || '<span class="muted">Tap a player for a touch. Hold for goal, assist, turnover or block.</span>'}</div>${ev.length ? '<button type="button" class="btn small-btn" data-a="undo-stat">Undo</button>' : ''}<button type="button" class="btn small-btn" data-a="voice-open" data-v="play">Voice</button></div>`;
+    const items = narrativeHtml(ev, true);
+    return `<div class="chain-row"><div class="chain" aria-live="polite">${items || '<span class="muted">Tap a player for a touch. Hold for goal, assist, turnover or block.</span>'}</div>${ev.length > 1 ? '<span class="small muted chain-hint">Hold and drag to reorder</span>' : ''}${ev.length ? '<button type="button" class="btn small-btn" data-a="undo-stat">Undo</button>' : ''}<button type="button" class="btn small-btn" data-a="voice-open" data-v="play">Voice</button></div>`;
   }
   function liveScreen() {
     const g = G(), onField = liveOnField(), pv = getPreviews();
@@ -378,14 +399,18 @@
     return `${scoreboard(true)}
     <div class="game">
       <section class="panel">
-        <div class="live-top"><div class="timer-wrap"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div><button type="button" class="btn small-btn" data-a="pause">${g.live.pausedAt ? 'Resume' : 'Pause'}</button></div>
-        <div class="score-btns"><button type="button" class="btn primary" data-a="result" data-v="us">We scored</button><button type="button" class="btn" data-a="result" data-v="them">They scored</button></div></div>
+        <div class="live-top"><div class="timer-wrap"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div>${g.live.review ? '' : `<button type="button" class="btn small-btn" data-a="pause">${g.live.pausedAt ? 'Resume' : 'Pause'}</button>`}</div>
+        ${g.live.review
+          ? `<div class="review"><div><h3>${g.live.review.result === 'us' ? 'We scored' : 'They scored'}</h3><p class="small muted">Check the play and the lineup, then finalize.</p></div><div class="chips"><button type="button" class="btn small-btn" data-a="keep-playing">Keep playing</button><button type="button" class="btn primary" data-a="finalize">Finalize point</button></div></div>`
+          : '<div class="score-btns"><button type="button" class="btn primary" data-a="result" data-v="us">We scored</button><button type="button" class="btn" data-a="result" data-v="them">They scored</button></div>'}</div>
+        ${g.live.review ? offFieldNote(g.live) : ''}
+        ${fixBar()}
         ${selectionBar()}
         ${voiceBox()}
         ${chainStrip()}
         <div class="panel-head"><span class="label">On the field</span>${legend()}${energyKey}</div>
         <div class="cards">${onField.map(fieldCard).join('')}</div>
-        <div class="panel-foot">${twoTap('cancel-pt', 'cancel-point', 'Cancel this point', 'Tap again to cancel')}<button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></div>
+        <div class="panel-foot"><span class="chips">${twoTap('cancel-pt', 'cancel-point', 'Cancel this point', 'Tap again to cancel')}<button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></div>
       </section>
       <section class="panel" data-drop="none">
         <div class="panel-head"><h2>Next up</h2>${modeSeg()}</div>
@@ -405,11 +430,13 @@
       <div class="panel-head"><h2>Point ${i + 1}</h2><span class="chip on${p.on}">${p.on === 'O' ? 'Offense' : 'Defense'}</span><span>${p.result === 'us' ? 'We scored' : 'They scored'} · <b>${us}–${them}</b></span>
         <span class="right"><button type="button" class="btn small-btn" data-a="edit-step" data-d="-1" ${i ? '' : 'disabled'}>Earlier</button><button type="button" class="btn small-btn" data-a="edit-step" data-d="1" ${i < len - 1 ? '' : 'disabled'}>Later</button><button type="button" class="btn small-btn primary" data-a="edit-done">Done</button></span></div>
       <div class="time-row"><span class="label">Point length</span><span class="step"><button type="button" data-a="pt-time" data-d="-15" aria-label="15 seconds less">−15</button><input id="pt-time" type="text" inputmode="numeric" data-c="pt-time" value="${clock(p.endedAt - p.startedAt)}" aria-label="Point length, minutes and seconds"><button type="button" data-a="pt-time" data-d="15" aria-label="15 seconds more">+15</button></span></div>
+      ${offFieldNote(p)}${fixBar()}${selectionBar()}
       ${voiceBox()}
       ${chainStrip()}
       <div class="panel-head"><span class="label">On the field</span>${legend()}</div>
       <div class="cards">${onField.map(fieldCard).join('')}</div>
-      <div class="panel-foot"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></div>
+      ${fixLine ? `<div class="label">Not on the field</div><div class="list">${S.players.filter((x) => !onField.includes(x.id)).map((x) => benchRow(x.id, true)).join('')}</div>` : ''}
+      <div class="panel-foot"><span class="chips"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></div>
     </section>`;
   }
 
@@ -487,11 +514,11 @@
     return `<div class="scrim" data-a="close-sheet" data-self="1"><div class="sheet" role="dialog" aria-label="Edit ${esc(p.name)}">
       <div class="form-row"><label class="field grow"><span class="label">Name</span><input id="edit-name" type="text" data-c="edit-name" value="${esc(p.name)}" autocomplete="off"></label>
       <label class="field jersey"><span class="label">Jersey</span><input id="edit-no" type="text" inputmode="numeric" data-c="edit-no" value="${esc(p.no)}" autocomplete="off"></label><button type="button" class="btn primary" data-a="close-sheet">Done</button></div>
+      <div class="field"><span class="label">Gender</span>${seg('set-match', p.match, [['M', 'Male (MMP)'], ['W', 'Female (WMP)']])}</div>
       ${allSkills().map(([k, l]) => `<div class="field"><span class="label">${esc(l)}</span><div class="pips">${[1, 2, 3, 4, 5].map((v) => `<button type="button" data-a="set-skill" data-k="${k}" data-v="${v}" aria-pressed="${E.rate(p, k) === v}">${v}</button>`).join('')}</div></div>`).join('')}
       <div class="field"><span class="label">Tags</span><div class="taglist">${S.rules.tags.map((t) => `<button type="button" class="tog" data-a="toggle-tag" data-v="${esc(t)}" aria-pressed="${p.tags.includes(t)}">${esc(t)}</button>`).join('')}</div></div>
       <div class="field"><span class="label">Playtime target</span>${seg('set-target', p.target, E.TARGETS.map((t) => [t, TARGET_LABEL[t]]))}</div>
       <div class="rl"><span>Minimum points per game</span>${stepper('set-min', E.minPointsOf(p), 0, 15)}</div>
-      ${mixed() ? `<div class="field"><span class="label">Matches as</span>${seg('set-match', p.match, [['W', 'WMP'], ['M', 'MMP']])}</div>` : ''}
       <label class="field"><span class="label">Sounds like (for voice)</span><input id="edit-alias" type="text" data-c="edit-alias" value="${esc(p.aliases || '')}" placeholder="Other spellings or nicknames, separated by commas" autocomplete="off"></label>
       <div class="field"><span class="label">Contacts for stats emails</span>
         ${(p.contacts || []).map((c) => `<div class="sub-row"><span><strong>${esc(c.name || c.email)}</strong> <span class="small muted">${esc(c.relation)} · ${esc(c.email)}</span></span><span class="chips"><button type="button" class="tog here" data-a="toggle-sub" data-id="${p.id}" data-v="${c.id}" aria-pressed="${c.subscribed}">${c.subscribed ? 'Subscribed' : 'Off'}</button><button type="button" class="btn small-btn danger" data-a="del-contact" data-v="${c.id}">Remove</button></span></div>`).join('')}
@@ -557,7 +584,7 @@
       p.result === 'us' ? us++ : them++;
       const name = (id) => (P(id) ? esc(P(id).name) : 'Removed player');
       const chips = p.lineup.filter((id) => P(id)).map((id) => `<span class="sug static">${tile(P(id), true)}<span>${name(id)}</span><span class="tag small muted" ${tipAttr(posName((p.roles || {})[id]))}>${esc(posAbbr((p.roles || {})[id]))}</span></span>`).join('');
-      const events = (p.events || []).map((e) => evChip(e)).join('<span class="muted"> → </span>');
+      const events = narrativeHtml(p.events);
       const subs = (p.subs || []).map((s) => `${name(s.in)} in for ${name(s.out)}`).join(', ');
       return `<article class="pp"><div class="pp-head"><strong>Point ${i + 1}</strong><span class="chip on${p.on}">${p.on === 'O' ? 'Offense' : 'Defense'}</span><span>${p.result === 'us' ? 'We scored' : 'They scored'}</span><b class="pp-score">${us}–${them}</b><span class="muted small">${clock(p.endedAt - p.startedAt)}</span>${src.key === 'current' ? `<button type="button" class="btn small-btn pp-edit" data-a="edit-point" data-v="${i}">Edit</button>` : ''}</div>
         <div class="sug-chips">${chips}</div>
@@ -866,7 +893,18 @@
     pt.events = pt.events || [];
     list.forEach((ev) => E.addEvent(pt.events, ev, at));
   }
+  function fixPlayer(out, inn) {
+    const pt = activePt();
+    commit(() => {
+      if (pt.lineup.includes(out)) pt.lineup = pt.lineup.map((x) => (x === out ? inn : x));
+      else (pt.subs || []).forEach((s) => { if (s.in === out) s.in = inn; });
+      pt.roles = pt.roles || {};
+      pt.roles[inn] = pt.roles[out]; delete pt.roles[out];
+      sel = null;
+    });
+  }
   function subLive(out, inn) {
+    if (fixLine) { fixPlayer(out, inn); return; }
     const g = G();
     commit(() => { g.live.subs = g.live.subs || []; g.live.subs.push({ out, in: inn, at: Date.now() }); g.live.roles[inn] = g.live.roles[out]; sel = null; });
   }
@@ -924,22 +962,42 @@
   function refreshVoice() {
     const p = document.getElementById('voice-preview'); if (p) p.innerHTML = voicePreview();
   }
+  function applyLine(r) {
+    const d = G().draft;
+    if (r.clear) d.line = {};
+    if (r.assign.length >= targetSize()) d.line = {};
+    r.swaps.forEach((s) => { const pos = d.line[s.out]; delete d.line[s.out]; place(s.in, pos || bestPosIn(s.in)); });
+    r.remove.forEach((id) => { delete d.line[id]; });
+    r.assign.forEach((x) => {
+      if (!d.line[x.id] && Object.keys(d.line).length >= targetSize()) return;
+      memo = null; place(x.id, x.pos || d.line[x.id] || bestPos(x.id));
+    });
+    memo = null;
+    if (r.useSuggestion) { const s = suggestion(); if (s) s.ids.forEach((id) => { if (!d.line[id]) d.line[id] = s.roles[id]; }); }
+  }
   function heard(text) {
     const g = G();
-    if (!g || !g.live || editIdx !== null || !text.trim()) return;
+    if (!g || editIdx !== null || !text.trim()) return;
+    if (voice) { voice.last = text; voice.text = ''; }
+    if (!g.live) {
+      const r = E.parseLine(text, voicePlayers(), S.rules.positions, { pos: voice && voice.linePos });
+      if (voice) voice.linePos = r.lastPos || voice.linePos;
+      if (r.assign.length || r.swaps.length || r.remove.length || r.clear || r.useSuggestion) commit(() => applyLine(r)); else render();
+      return;
+    }
     const chain = E.chainOf(g.live.events).filter((e) => e.t === 'touch');
     const holder = chain.length ? chain[chain.length - 1].id : undefined;
-    const r = E.parsePlay(text, liveOnField().map(P), { holder });
-    if (voice) { voice.last = text; voice.text = ''; }
+    const r = parseLive(text, { holder });
     const events = r.events.filter((e) => !e.seed);
     if (r.hasGoal && !r.events.some((e) => e.t === 'goal') && holder) events.push({ t: 'goal', id: holder });
-    if (r.hasGoal) { addStats(events); A.result({ v: 'us' }); return; }
-    if (r.theyScored) { addStats(events); A.result({ v: 'them' }); return; }
+    const ending = !g.live.review;
+    if (r.hasGoal && ending) { addStats(events); A.result({ v: 'us' }); return; }
+    if (r.theyScored && ending) { addStats(events); A.result({ v: 'them' }); return; }
     if (events.length) commitLight(() => addStats(events)); else render();
   }
   const speechWords = () => (Root.voiceMode === 'any' ? undefined : E.speechVocabulary(S.players, S.rules.positions));
   function startOpenMic() {
-    voice = { kind: 'play', text: '', listening: true, open: true, status: 'Listening. Just talk.', last: '' };
+    voice = { kind: G().live ? 'play' : 'line', text: '', listening: true, open: true, status: 'Listening. Just talk.', last: '' };
     render();
     Speech.start('', {
       words: speechWords(),
@@ -955,7 +1013,7 @@
   /* ---------- Actions ---------- */
   function resume(l) { if (!l.pausedAt) return; const d = Date.now() - l.pausedAt; l.startedAt += d; (l.subs || []).forEach((s) => { s.at += d; }); delete l.pausedAt; }
   const A = {
-    tab(d) { stopVoice(); uiChange(() => { tab = d.v; sel = null; voice = null; menu = null; editIdx = null; }); },
+    tab(d) { stopVoice(); uiChange(() => { tab = d.v; sel = null; voice = null; menu = null; editIdx = null; fixLine = false; }); },
     confirm(d, el) {
       if (confirmKey === d.key) { clearTimeout(confirmTimer); confirmKey = null; A[d.then](d, el); return; }
       confirmKey = d.key; render(); clearTimeout(confirmTimer);
@@ -1010,21 +1068,43 @@
     },
     'cancel-point'() { stopVoice(); commit(() => { G().live = null; sel = null; voice = null; }); },
     result(d) {
-      const g = G(), pv = getPreviews()[d.v];
-      stopVoice();
+      const g = G(), l = g.live;
+      if (l.review) return;
       commit(() => {
-        resume(g.live);
-        const { pausedAt, ...finished } = g.live;
-        g.points.push({ ...finished, endedAt: Date.now(), result: d.v });
-        g.live = null; sel = null; voice = null;
-        g.draft = newDraft(pv.line ? { ids: pv.line.ids, on: pv.ctx.on } : null);
+        if (!l.pausedAt) l.pausedAt = Date.now();
+        l.review = { result: d.v };
+        if (d.v === 'them') E.addEvent(l.events, { t: 'oppgoal' }, Date.now());
+        sel = null;
       });
     },
+    finalize() {
+      const g = G(), l = g.live, pv = getPreviews()[l.review.result];
+      stopVoice();
+      commit(() => {
+        const { pausedAt, review, ...finished } = l;
+        g.points.push({ ...finished, endedAt: pausedAt, result: review.result });
+        g.live = null; sel = null; voice = null; fixLine = false;
+        g.draft = newDraft(pv.line ? { ids: pv.line.ids, on: pv.ctx.on } : null);
+      });
+      if (openMic) startOpenMic();
+    },
+    'keep-playing'() {
+      const l = G().live;
+      commit(() => {
+        delete l.review;
+        const last = l.events[l.events.length - 1];
+        if (last && (last.t === 'goal' || last.t === 'oppgoal')) { const at = last.at; while (l.events.length && l.events[l.events.length - 1].at === at) l.events.pop(); }
+        resume(l);
+      });
+    },
+    'fix-line'() { uiChange(() => { fixLine = !fixLine; sel = null; }); },
+    'fix-with'(d) { uiChange(() => { fixLine = true; sel = d.id; }); },
     undo() { editIdx = null; commit(() => { const g = G(), p = g.points.pop(); const { endedAt, result, ...live } = p; live.events = live.events || []; live.pausedAt = endedAt;
       const last = live.events[live.events.length - 1];
-      if (last && last.t === 'goal') { const at = last.at; while (live.events.length && live.events[live.events.length - 1].at === at) live.events.pop(); } g.live = live; g.draft = newDraft(); }); },
+      if (last && (last.t === 'goal' || last.t === 'oppgoal')) { const at = last.at; while (live.events.length && live.events[live.events.length - 1].at === at) live.events.pop(); } g.live = live; g.draft = newDraft(); }); },
     'undo-stat'() { (editIdx !== null ? commit : commitLight)(() => { const ev = activePt().events; const at = ev[ev.length - 1].at; while (ev.length && ev[ev.length - 1].at === at) ev.pop(); }); },
     'tap-field'(d) {
+      if (fixLine && !sel) return uiChange(() => { sel = d.id; });
       if (sel) {
         if (sel === d.id) return uiChange(() => { sel = null; });
         if (!liveOnField().includes(sel)) return subLive(d.id, sel);
@@ -1037,13 +1117,13 @@
       uiChange(() => { sel = sel === d.id ? null : d.id; });
     },
     'menu-close'() { uiChange(() => { menu = null; }); },
-    stat(d) { const id = menu.id; menu = null; if (d.v === 'goal' && editIdx === null) { addStats([{ t: 'goal', id }]); A.result({ v: 'us' }); return; } (editIdx !== null ? commit : commitLight)(() => addStats([{ t: d.v, id }])); },
+    stat(d) { const id = menu.id; menu = null; if (d.v === 'goal' && editIdx === null && !G().live.review) { addStats([{ t: 'goal', id }]); A.result({ v: 'us' }); return; } (editIdx !== null ? commit : commitLight)(() => addStats([{ t: d.v, id }])); },
     'opp-turn'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'oppturn' }])); },
     pause() { const l = G().live; commitLight(() => { if (l.pausedAt) resume(l); else l.pausedAt = Date.now(); }); },
     'edit-prev'() { stopVoice(); uiChange(() => { editIdx = G().points.length - 1; sel = null; voice = null; }); },
     'edit-point'(d) { uiChange(() => { editIdx = Number(d.v); tab = 'game'; sel = null; voice = null; }); },
-    'edit-step'(d) { stopVoice(); uiChange(() => { editIdx += Number(d.d); voice = null; }); },
-    'edit-done'() { stopVoice(); uiChange(() => { editIdx = null; voice = null; }); },
+    'edit-step'(d) { stopVoice(); uiChange(() => { editIdx += Number(d.d); voice = null; fixLine = false; sel = null; }); },
+    'edit-done'() { stopVoice(); uiChange(() => { editIdx = null; voice = null; fixLine = false; sel = null; }); },
     'pt-view-all'() { stopVoice(); uiChange(() => { editIdx = null; voice = null; tab = 'time'; ptView = 'points'; pointsSource = 'current'; }); },
     'pt-time'(d) { commit(() => { const p = activePt(); p.endedAt = Math.max(p.startedAt + 1000, p.endedAt + Number(d.d) * 1000); }); },
     'settings-open'() { uiChange(() => { settingsOpen = true; }); },
@@ -1066,28 +1146,15 @@
       });
     },
     'voice-add'(d) {
-      const r = E.parsePlay(voice.text, liveOnField().map(P));
+      const r = parseLive(voice.text);
       stopVoice();
       if (d.v) { addStats(r.events); voice = null; A.result({ v: d.v }); return; }
       commitLight(() => { addStats(r.events); voice = null; });
     },
     'voice-line'() {
-      const r = E.parseLine(voice.text, voicePlayers(), S.rules.positions), g = G();
+      const r = E.parseLine(voice.text, voicePlayers(), S.rules.positions);
       stopVoice();
-      commit(() => {
-        const d = g.draft;
-        if (r.clear) d.line = {};
-        if (r.assign.length >= targetSize()) d.line = {};
-        r.swaps.forEach((s) => { const pos = d.line[s.out]; delete d.line[s.out]; place(s.in, pos || bestPosIn(s.in)); });
-        r.remove.forEach((id) => { delete d.line[id]; });
-        r.assign.forEach((a) => {
-          if (!d.line[a.id] && Object.keys(d.line).length >= targetSize()) return;
-          memo = null; place(a.id, a.pos || d.line[a.id] || bestPos(a.id));
-        });
-        memo = null;
-        if (r.useSuggestion) { const s = suggestion(); if (s) s.ids.forEach((id) => { if (!d.line[id]) d.line[id] = s.roles[id]; }); }
-        voice = null; sel = null;
-      });
+      commit(() => { applyLine(r); voice = null; sel = null; });
     },
     'end-game'() {
       stopVoice();
@@ -1202,7 +1269,28 @@
   let g0 = null, dragging = null, suppressClick = false;
   const suppress = () => { suppressClick = true; setTimeout(() => { suppressClick = false; }, 400); };
   function openMenu(id, x, y) { menu = { id, x: x + 8, y: y - 20 }; hideTip(); render(); }
+  function moveNarrative(from, to, side) {
+    const pt = activePt(), items = Report.narrative(pt.events);
+    let at = to > from ? to - 1 : to;
+    if (side === 'after') at += 1;
+    if (at === from) return;
+    const [moving] = items.splice(from, 1);
+    items.splice(at, 0, moving);
+    const flat = items.flatMap((it) => it.idxs.map((i) => pt.events[i]));
+    commit(() => { pt.events = E.reflow(flat); });
+  }
   function beginDrag(id, x, y, el) {
+    if (id.startsWith('ev:')) {
+      el.classList.add('dragged');
+      const ghost = document.createElement('div');
+      ghost.className = 'ghost';
+      ghost.textContent = el.textContent;
+      document.body.appendChild(ghost);
+      dragging = { ev: Number(id.slice(3)), ghost, el };
+      hideTip();
+      moveDrag(x, y);
+      return;
+    }
     const p = P(id);
     if (!p) return;
     el.classList.add('dragged');
@@ -1217,6 +1305,16 @@
   function moveDrag(x, y) {
     const { ghost } = dragging;
     ghost.style.left = x + 'px'; ghost.style.top = y + 'px';
+    if (dragging.ev !== undefined) {
+      let best = null, dist = Infinity;
+      document.querySelectorAll('[data-evi]').forEach((el) => {
+        el.classList.remove('ins-before', 'ins-after');
+        const r = el.getBoundingClientRect(), d = Math.hypot(x - (r.left + r.width / 2), (y - (r.top + r.height / 2)) * 2);
+        if (d < dist) { dist = d; best = { el, side: x < r.left + r.width / 2 ? 'before' : 'after' }; }
+      });
+      if (best) { best.el.classList.add(best.side === 'before' ? 'ins-before' : 'ins-after'); dragging.to = Number(best.el.dataset.evi); dragging.side = best.side; }
+      return;
+    }
     const under = document.elementFromPoint(x, y);
     const zone = under && under.closest('[data-drop]');
     if (dragging.zone !== zone) {
@@ -1229,6 +1327,12 @@
   function endDrag(apply) {
     const d = dragging; dragging = null;
     d.ghost.remove(); d.el.classList.remove('dragged');
+    if (d.ev !== undefined) {
+      document.querySelectorAll('.ins-before,.ins-after').forEach((el) => el.classList.remove('ins-before', 'ins-after'));
+      suppress();
+      if (apply && d.to !== undefined && d.to !== d.ev) moveNarrative(d.ev, d.to, d.side);
+      return;
+    }
     if (d.zone) d.zone.classList.remove('drop-on');
     suppress();
     if (!apply || !d.zone) return;
