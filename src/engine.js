@@ -37,6 +37,12 @@ const Engine = (() => {
     positions: defaultPositions(),
     tolerance: 2,
     maxStreak: 2,
+    timeoutsPerHalf: 2,
+    floaters: 0,
+    softCap: 0,
+    hardCap: 0,
+    timeCap: 0,
+    capAlarms: false,
     tags: ['Deep', 'Lockdown', 'Puller', 'Leader', 'Rookie'],
     tagRules: [
       { tag: 'Puller', min: 1, max: null, when: 'D' },
@@ -450,13 +456,22 @@ const Engine = (() => {
         if (need > 0 && need >= ctx.minLeft) warnings.push(`${p.name} still needs ${need} of a ${minPointsOf(p)}-point minimum, and the game could end in ${ctx.minLeft}.`);
       }
     }
-    const mean = (arr, k) => arr.reduce((a, p) => a + rate(p, k), 0) / Math.max(1, arr.length);
+    // Cutting blends in stamina, and players in the matching spots count double.
+    const valueOf = (p, k) => (k === 'c' ? (rate(p, 'c') * 2 + rate(p, 's')) / 3 : rate(p, k));
+    const slotSkill = (p) => { const l = limits.find((x) => x.id === roles[p.id]); return l ? l.skill : null; };
+    const weightOf = (p, k) => ((k === 'h' || k === 'c') && slotSkill(p) === k ? 2 : 1);
+    const mean = (arr, k, weighted) => {
+      let sum = 0, w = 0;
+      arr.forEach((p) => { const x = weighted ? weightOf(p, k) : 1; sum += valueOf(p, k) * x; w += x; });
+      return w ? sum / w : 0;
+    };
+    const NOTE = { h: 'Players in handler spots count double.', c: 'Cutting is (cut × 2 + stamina) ÷ 3, and players in cutter spots count double.' };
     const strength = [];
     const seen = new Set();
     for (const l of limits) {
       if (seen.has(l.skill)) continue;
       seen.add(l.skill);
-      strength.push({ key: l.skill, label: skillLabel(rules, l.skill), line: mean(line, l.skill), team: mean(avail, l.skill) });
+      strength.push({ key: l.skill, label: skillLabel(rules, l.skill), line: mean(line, l.skill, true), team: mean(avail, l.skill), note: NOTE[l.skill] || '' });
     }
     const plan = model.plan ? { left: model.plan.left, rest: model.plan.sit.filter((p) => !onIds.has(p.id)).map((p) => p.name) } : null;
     return { ids: line.map((p) => p.id), roles, score, warnings, strength, plan };
@@ -543,6 +558,24 @@ const Engine = (() => {
       return;
     }
     if (ev.t === 'assist') {
+      // An assist entered after the goal was the throw to the scorer.
+      const last = events[events.length - 1];
+      if (last && last.t === 'goal') {
+        if (last.id === ev.id) return;
+        const gi = events.length - 1;
+        let start = gi;
+        while (start > 0 && !BREAKS.has(events[start - 1].t)) start--;
+        const list = events.slice(start, gi).filter((x) => x.t !== 'assist');
+        let si = -1;
+        for (let k = list.length - 1; k >= 0; k--) if (list[k].t === 'touch' && list[k].id === last.id) { si = k; break; }
+        if (si < 0) { list.push({ t: 'touch', id: last.id, at: last.at }); si = list.length - 1; }
+        const prev = list[si - 1];
+        if (!(prev && prev.t === 'touch' && prev.id === ev.id)) list.splice(si, 0, { t: 'touch', id: ev.id, at: list[si].at });
+        list.push({ t: 'assist', id: ev.id, at: last.at });
+        delete last.sub;
+        events.splice(start, gi - start, ...list);
+        return;
+      }
       if (!lastTouch || lastTouch.id !== ev.id) events.push({ t: 'touch', id: ev.id, at });
       events.push({ t: 'assist', id: ev.id, at });
       return;
@@ -570,7 +603,7 @@ const Engine = (() => {
       if (ev.implicit || ev.auto) continue;
       const last = out[out.length - 1];
       if (last && last.t === 'turn' && NEEDS_DISC.has(ev.t)) out.push({ t: 'oppturn', at: ev.at, implicit: true });
-      if (ev.t === 'goal') {
+      if (ev.t === 'goal' && ev.sub !== 'callahan') {
         const chain = chainOf(out);
         if (!chain.some((x) => x.t === 'assist')) {
           const prior = chain.filter((x) => x.t === 'touch' && x.id !== ev.id).pop();
@@ -580,6 +613,16 @@ const Engine = (() => {
       out.push(ev);
     }
     return out;
+  }
+
+  // A Callahan is a defender catching the goal, so there is no assist.
+  function setCallahan(events, idx, on) {
+    const g = events[idx];
+    if (!g || g.t !== 'goal') return events;
+    if (on) g.sub = 'callahan'; else delete g.sub;
+    let start = idx;
+    while (start > 0 && !BREAKS.has(events[start - 1].t)) start--;
+    return reflow(events.filter((x, k) => !(on && k >= start && k < idx && x.t === 'assist')));
   }
 
   /* ---------- Understanding speech ---------- */
@@ -657,6 +700,13 @@ const Engine = (() => {
   // "number twelve", "number twenty one" or "number 21".
   const ONES = 'zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split(' ');
   const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  // A jersey number said on its own. "one", "two" and "four" sound like other words, so those need "number" first.
+  function bareJersey(tokens, i, players) {
+    const a = tokens[i];
+    if (a === undefined || ['one', 'two', 'four', 'zero'].includes(a)) return null;
+    if (!/^\d+$/.test(a) && ONES.indexOf(a) < 0 && TENS.indexOf(a) < 2) return null;
+    return jerseyAt(tokens, i, players);
+  }
   function jerseyAt(tokens, i, players) {
     const a = tokens[i], b = tokens[i + 1];
     if (a === undefined) return null;
@@ -719,6 +769,10 @@ const Engine = (() => {
       if (t === 'number') {
         const j = jerseyAt(tokens, i + 1, players.concat((opts && opts.bench) || []));
         if (j) { seq.push({ k: 'p', id: j.p.id, via: viaTo, by: viaBy, unsure: false }); viaTo = viaBy = false; i += 1 + j.w; continue; }
+      }
+      {
+        const j = bareJersey(tokens, i, players) || bareJersey(tokens, i, (opts && opts.bench) || []);
+        if (j && !players.some((p) => variantsOf(p).includes(t))) { seq.push({ k: 'p', id: j.p.id, via: viaTo, by: viaBy, from: viaFrom, unsure: false }); viaTo = viaBy = viaFrom = false; i += j.w; continue; }
       }
       // Prefer someone on the field. Only a clearly better match pulls a bench player in.
       let m = mentionAt(tokens, i, players, blocked);
@@ -804,6 +858,10 @@ const Engine = (() => {
         const j = jerseyAt(tokens, i + 1, players);
         if (j) { seq.push({ k: 'p', id: j.p.id, unsure: false }); i += 1 + j.w; continue; }
       }
+      {
+        const j = bareJersey(tokens, i, players);
+        if (j) { seq.push({ k: 'p', id: j.p.id, unsure: false }); i += j.w; continue; }
+      }
       const m = mentionAt(tokens, i, players, blocked);
       if (m) { seq.push({ k: 'p', id: m.id, unsure: m.unsure }); i += m.w; continue; }
       if (CMD.has(t)) { seq.push({ k: CMD.get(t) }); i++; continue; }
@@ -836,6 +894,6 @@ const Engine = (() => {
     return out;
   }
 
-  return { MIN, MAX_POSITIONS, TARGETS, defaultRules, defaultPositions, rate, replay, score, context, suggest, evaluate, preview, fresh, shares, limitsFor, skillLabel, addEvent, reflow, chainOf, profileMatch, speechVocabulary, parsePlay, parseLine, minPointsOf };
+  return { MIN, MAX_POSITIONS, TARGETS, defaultRules, defaultPositions, rate, replay, score, context, suggest, evaluate, preview, fresh, shares, limitsFor, skillLabel, addEvent, reflow, chainOf, profileMatch, speechVocabulary, parsePlay, parseLine, minPointsOf , setCallahan };
 })();
 if (typeof module !== 'undefined') module.exports = Engine;

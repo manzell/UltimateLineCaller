@@ -7,3 +7,6 @@ window.FIREBASE_CONFIG = {
   messagingSenderId: "144572757116",
   appId: "1:144572757116:web:f79e0379d89ab4340cc5f9"
 };
+
+// Where the desktop site and the RSVP page are published.
+window.SITE_URL = 'https://manzell.github.io/UltimateLineCaller/';

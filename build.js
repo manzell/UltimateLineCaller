@@ -32,4 +32,6 @@ const bridge = nm('@capacitor/core/dist/capacitor.js') + nm('firebase/firebase-a
 const favicon = `<link rel="icon" type="image/png" href="data:image/png;base64,${fs.readFileSync(path.join(__dirname, 'src/icon-64.png')).toString('base64')}">`;
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8">${favicon}<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0);padding-bottom:env(safe-area-inset-bottom,0)}body{margin:0;font-size:14px}img{max-width:100%}[hidden]{display:none!important}</style></head><body>${body(bridge)}</body></html>`;
 fs.writeFileSync(path.join(__dirname, 'www/index.html'), page);
+// The RSVP page families open from a link. It talks to the database directly, with no sign-in.
+fs.writeFileSync(path.join(__dirname, 'www/rsvp.html'), read('rsvp.html').replace('/*CONFIG*/', read('firebase-config.js')).replace('/*FAVICON*/', favicon));
 console.log('built', (page.length / 1024).toFixed(0) + ' KB');

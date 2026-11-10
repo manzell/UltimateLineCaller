@@ -82,6 +82,61 @@ check(box.includes('3 (1/2)'), 'points shown as total (O/D)');
   check(t2.turn === 2 && t2.drop === 1, 'drop and throwaway counted');
 }
 
+// Opponent passes, who has the disc, and the printable scoresheet.
+{
+  const ev = [{ t: 'opppass' }, { t: 'opppass' }, { t: 'block', id: 'a' }, touch('a')];
+  const n = Report.narrative(ev);
+  check(n[0].t === 'opppass' && n[0].n === 2 && n.length === 3, 'opponent passes grouped');
+  check(Report.holder({ on: 'D', events: [] }) === 'them' && Report.holder({ on: 'D', events: ev }) === 'us', 'disc holder');
+  check(Report.holder({ on: 'O', events: [touch('a'), { t: 'turn', id: 'a' }] }) === 'them', 'turnover gives them the disc');
+  const rows = 'abcdefghijklmnopqrstuvwxyz'.split('').map((id, i) => ({ id, name: 'Player ' + id + 'é(x)', no: String(i), match: i % 2 ? 'W' : 'M' }));
+  const pts = Array.from({ length: 30 }, (_, i) => pt(['a', 'b', 'c'], i % 2 ? 'O' : 'D', i % 3 ? 'us' : 'them', [touch('a'), { t: 'assist', id: 'a' }, { t: 'goal', id: 'b' }]));
+  const pdf = Report.scoresheetPdf({ title: 'Flyers vs Tigers', subtitle: 'Final', points: pts, rows, mixed: true });
+  const s = String.fromCharCode(...pdf);
+  check(s.startsWith('%PDF-1.4') && s.trim().endsWith('%%EOF') && (s.match(/\/Type \/Page /g) || []).length === 1, 'one-page PDF');
+  check(s.includes('/MediaBox [0 0 792 612]'), 'landscape letter');
+  check(s.includes('(#25)') && ![...s].some((ch) => ch.charCodeAt(0) > 255), 'jersey numbers with #, single-byte text');
+  const xref = Number(s.match(/startxref\n(\d+)/)[1]);
+  check(s.slice(xref, xref + 4) === 'xref', 'xref offset is right');
+  const c = Report.combos([{ ...pts[1], startedAt: 0, endedAt: 60000 }, { ...pts[2], startedAt: 0, endedAt: 30000 }], [2]);
+  check(c[0].ms === 90000, 'combo playtime together');
+}
+
+// Team stats, completions and playtime.
+{
+  const a = { lineup: ['a', 'b'], subs: [], roles: {}, startedAt: 0, endedAt: 100000 };
+  const pts = [
+    { ...a, on: 'O', result: 'us', events: [touch('a'), touch('b'), { t: 'assist', id: 'a' }, { t: 'goal', id: 'b' }] },
+    { ...a, on: 'D', result: 'us', events: [{ t: 'opppass', at: 10000 }, { t: 'block', id: 'a', at: 50000 }, touch('a'), touch('b'), { t: 'assist', id: 'a' }, { t: 'goal', id: 'b' }] },
+    { ...a, on: 'O', result: 'them', events: [touch('a'), { t: 'turn', sub: 'drop', id: 'b', at: 20000 }] },
+    { ...a, on: 'D', result: 'them', events: [] },
+  ];
+  const s = Report.teamStats(pts);
+  check(s.us.goals === 2 && s.us.holds === 1 && s.us.breaks === 1, 'our holds and breaks');
+  check(s.them.goals === 2 && s.them.holds === 1 && s.them.breaks === 1, 'their holds and breaks');
+  check(s.us.comp === 2 && s.them.comp === 1, 'completions: ' + s.us.comp + '/' + s.them.comp);
+  check(s.us.oGoals === 1 && s.us.oPoss === 2 && s.us.dGoals === 1 && s.us.dPoss === 1, 'offense and defense possessions');
+  check(s.us.clean === 1 && s.them.clean === 1, 'clean holds');
+  check(s.us.turns === 1 && s.us.drops === 1 && s.them.turns === 1, 'turnovers');
+  check(Math.round(s.us.ms + s.them.ms) === 400000, 'possession time adds up');
+  const t = Report.totals(pts);
+  check(t.get('a').comp === 2 && t.get('b').rec === 2 && t.get('a').ms === 400000, 'completions, receptions and playtime');
+  const sub = Report.totals([{ ...a, on: 'O', result: 'us', subs: [{ out: 'b', in: 'c', at: 30000 }], events: [] }]);
+  check(sub.get('b').ms === 30000 && sub.get('c').ms === 70000, 'sub playtime split');
+  const html = Report.boxTable(pts, [{ id: 'a', name: 'A', no: '1' }, { id: 'b', name: 'B', no: '2' }], { sortable: true, sort: { key: 'rec', dir: -1 }, time: true });
+  check(html.indexOf('>B<') < html.indexOf('>A<') && html.includes('data-a="box-sort"') && html.includes('6:40'), 'sortable box score with playtime');
+}
+
+// Team color on the possession bar, and arrows only for passes.
+{
+  const bar = Report.possessionBar({ startedAt: 0, endedAt: 10, on: 'O', events: [] }, '#ffcc00');
+  check(bar.includes('background:#ffcc00') && bar.includes('color:#11183a'), 'team color with readable text');
+  check(Report.possessionBar({ startedAt: 0, endedAt: 10, on: 'O', events: [] }, 'red;x').includes('#1f7a9c'), 'bad colors fall back');
+  const tm = { team: 'T', color: '#123456', rules: { positions: [] }, players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], schedule: [], history: [{ id: 'g', date: 1, us: 1, them: 0, perPlayer: { a: { played: 1 } }, points: [pt(['a', 'b'], 'D', 'us', [{ t: 'block', id: 'a' }, touch('a'), touch('b'), { t: 'goal', id: 'b' }])] }] };
+  const page = Report.html(tm);
+  check(page.includes('Block: A</b> · A → <b class="e-goal">Goal: B'), 'no arrow after a block: ' + (page.match(/rp-chain">[^\n]*/) || [''])[0].slice(0, 160));
+}
+
 // A player's own record.
 {
   const s = Report.playerSummary(points, 'a');

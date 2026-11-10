@@ -3,7 +3,7 @@
    Editing the roster on a desktop therefore can't overwrite a game being recorded on a phone. */
 const Cloud = (() => {
   const hash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return h >>> 0; };
-  const LOCAL_ONLY = ['game', 'history', 'setup', 'syncAt', 'syncHash', 'isExample', 'lastFinal', 'access'];
+  const LOCAL_ONLY = ['game', 'history', 'setup', 'syncAt', 'syncHash', 'isExample', 'lastFinal', 'access', 'rsvpAnswers', 'rsvpHash'];
   function infoOf(team) {
     const out = {};
     Object.keys(team).filter((k) => !LOCAL_ONLY.includes(k)).sort().forEach((k) => { out[k] = team[k]; });

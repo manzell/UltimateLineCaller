@@ -436,7 +436,82 @@ summary { cursor: pointer; min-height: 40px; display: flex; align-items: center;
 }
 
 /* Puller candidates before the pull */
-.tile.pull-ring { box-shadow: 0 0 0 2px rgba(255, 255, 255, .7), 0 0 0 3.5px rgba(0, 0, 0, .18); }
+.pc.pull-ring { box-shadow: 0 0 0 2px rgba(255, 255, 255, .85), 0 0 0 4.5px rgba(0, 0, 0, .55); }
 .ev.e-pull { background: #5b6b8c; color: #ffffff; }
 .check { display: flex; align-items: center; gap: 8px; }
 .check input { width: 20px; height: 20px; }
+
+/* Energy badge: small, on the name line, green to red */
+.fb { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 20px; padding: 2px 4px; border-radius: 3px; font: 700 .6875rem/1 var(--body); font-variant-numeric: tabular-nums; vertical-align: middle; }
+.fb.h0 { background: #1e9e57; color: #ffffff; }
+.fb.h1 { background: #b9d12c; color: #1c1d00; }
+.fb.h2 { background: #f5c400; color: #1c1400; }
+.fb.h3 { background: #f07a00; color: #1c0a00; }
+.fb.h4 { background: #d81e1e; color: #ffffff; }
+.pc, .br-main, .pc.onfield { grid-template-columns: minmax(0, 1fr); }
+.pc .nm, .br-main .nm, .pc .sub, .br-main .sub { grid-column: 1; }
+.pc .nm, .br-main .nm { display: flex; align-items: center; gap: 6px; }
+.pc .nm .tx, .br-main .nm .tx { min-width: 0; overflow-wrap: anywhere; }
+.arrow.arr-press { padding: 4px 2px; cursor: context-menu; -webkit-user-select: none; user-select: none; touch-action: none; }
+.arrow sup { font: 700 .625rem/1 var(--body); color: var(--accent); margin-left: 1px; }
+.video-row { align-items: flex-end; }
+
+/* Bench filters, opponent passes, insights */
+.bench-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.bench-filters .tog { min-height: 36px; padding: 4px 12px; font-size: var(--t-s); }
+.ev.stat.e-opppass { background: var(--ev-opp); }
+.panel-foot .chips { gap: 6px; }
+.insights { margin: 4px 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.insights li { line-height: 1.4; }
+.plink { min-height: 0; padding: 0; text-align: left; font: inherit; color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.plink:hover { color: var(--accent); }
+
+/* Sortable box score headers, team stats */
+.sorth { font: inherit; color: inherit; background: none; border: 0; padding: 0; min-height: 32px; cursor: pointer; white-space: nowrap; }
+th[aria-sort] .sorth { color: var(--ink); }
+.ts { margin-bottom: 4px; }
+
+/* Small mode chips in Next up */
+.mode-sm .seg { gap: 4px; padding: 3px; flex-wrap: wrap; }
+.mode-sm .seg button { min-height: 32px; padding: 3px 10px; font-size: var(--t-s); }
+.mode-sm .small { display: none; }
+/* Timeouts, caps */
+.to-row { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; margin-top: 6px; }
+.gclock { font-variant-numeric: tabular-nums; }
+.cap-note { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 8px; padding: 8px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn); }
+.cap-note b { flex: 1; }
+.score { flex-wrap: wrap; }
+/* Game Rules in setup */
+.setup-rules > summary { display: flex; align-items: baseline; gap: 12px; cursor: pointer; list-style: none; flex-wrap: wrap; }
+.setup-rules > summary h2 { margin: 0; }
+.setup-rules > summary::after { content: '▸'; margin-left: auto; color: var(--muted); }
+.setup-rules[open] > summary::after { content: '▾'; }
+/* Schedule edit and RSVP */
+.game-edit { padding: 8px 0; border-top: 1px solid var(--line); align-items: flex-end; }
+.rsvp-box { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.rsvp-box input { font-size: var(--t-s); }
+.rsvp-list summary { cursor: pointer; color: var(--muted); }
+.rsvp-list span { display: block; }
+.rsvp-yes { color: var(--good); } .rsvp-no { color: var(--bad); } .rsvp-maybe { color: var(--warn); }
+.rsvp-mark { font-weight: 700; }
+
+/* Calmer narrative on the Points tab */
+.sep { display: inline-block; width: 10px; }
+.chain.quiet { gap: 2px 4px; margin-top: 4px; }
+.chain.quiet .ev { font: 500 .9375rem/1.35 var(--body); color: var(--ink); }
+.chain.quiet .ev.stat { background: none; padding: 0; font-weight: 700; }
+.chain.quiet .e-goal { color: var(--ev-goal); } .chain.quiet .e-assist { color: var(--ev-assist); } .chain.quiet .e-turn { color: var(--ev-turn); }
+.chain.quiet .e-block { color: var(--ev-block); } .chain.quiet .e-oppturn, .chain.quiet .e-oppgoal, .chain.quiet .e-opppass { color: var(--ev-opp); } .chain.quiet .e-pull { color: var(--muted); }
+.chain.quiet .arrow { font-size: .8125rem; opacity: .6; }
+.chain.quiet .sep { width: 8px; }
+.pp .sug-chips { margin-top: 2px; }
+.pp { padding: 10px 0; }
+/* Pull warning inside the hold menu */
+.menu-warn { color: var(--bad); font-weight: 700; font-size: var(--t-s); padding: 6px 10px; max-width: 240px; }
+/* Back arrow, team brand */
+.back { font-size: 1.25rem; min-width: 44px; }
+.team-logo { width: 28px; height: 28px; object-fit: contain; border-radius: 5px; vertical-align: middle; margin-right: 6px; }
+.logo-prev { width: 44px; height: 44px; object-fit: contain; border-radius: 6px; background: var(--panel-2); }
+.brand-row { align-items: flex-end; }
+.brand-row input[type=color] { width: 64px; height: 44px; padding: 2px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+.file-btn { cursor: pointer; }

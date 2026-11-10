@@ -404,6 +404,47 @@ for (const [n, mixed, mode] of [[12, false, 'balanced'], [14, false, 'develop'],
   check(E.context({ startOn: 'O', points: [{ result: 'us' }] }, r).caller === 'them', 'offense calls: on D they call');
 }
 
+// Assists entered after the goal, Callahans, and the line meters.
+{
+  const ev = [];
+  E.addEvent(ev, { t: 'touch', id: 'a' }, 1); E.addEvent(ev, { t: 'goal', id: 'c' }, 2);
+  E.addEvent(ev, { t: 'assist', id: 'b' }, 3);
+  check(ev.map((x) => x.t + x.id).join() === 'toucha,touchb,touchc,assistb,goalc', 'late assist goes before the goal: ' + ev.map((x) => x.t + x.id));
+  const solo = [];
+  E.addEvent(solo, { t: 'goal', id: 'c' }, 1); E.addEvent(solo, { t: 'assist', id: 'b' }, 2);
+  check(solo.map((x) => x.t + x.id).join() === 'touchb,touchc,assistb,goalc', 'late assist with no prior touches');
+  let cal = [{ t: 'touch', id: 'a' }, { t: 'touch', id: 'c' }, { t: 'assist', id: 'a', auto: true }, { t: 'goal', id: 'c' }];
+  cal = E.setCallahan(cal, 3, true);
+  check(!cal.some((x) => x.t === 'assist') && cal.find((x) => x.t === 'goal').sub === 'callahan', 'callahan drops the assist');
+  cal = E.setCallahan(cal, cal.findIndex((x) => x.t === 'goal'), false);
+  check(cal.some((x) => x.t === 'assist' && x.auto), 'unmarking brings the assist back');
+  const r = E.defaultRules();
+  const ps = ['h1', 'h2', 'c1', 'c2', 'd1', 'd2', 'd3'].map((id, i) => ({ id, name: id, h: id[0] === 'h' ? 5 : 1, c: id[0] === 'c' ? 5 : 1, d: 3, s: id[0] === 'c' ? 2 : 3, tags: [], match: 'M' }));
+  const sug = E.suggest({ startOn: 'O', points: [], out: {}, mode: 'balanced' }, ps, r, { count: 1 });
+  const line = sug.lines ? sug.lines[0] : sug[0];
+  const st = line && line.strength;
+  if (st) {
+    const h = st.find((x) => x.key === 'h'), c = st.find((x) => x.key === 'c');
+    const inH = line.ids.filter((id) => line.roles[id] === 'H');
+    const expectH = line.ids.reduce((a, id) => a + ps.find((p) => p.id === id).h * (inH.includes(id) ? 2 : 1), 0) / (line.ids.length + inH.length);
+    check(Math.abs(h.line - expectH) < 1e-9, 'handler meter weights handler spots double');
+    check(Math.abs(c.team - ps.reduce((a, p) => a + (p.c * 2 + p.s) / 3, 0) / 7) < 1e-9, 'cutting blends stamina');
+  } else check(false, 'no strength to check');
+}
+
+// Jersey numbers on their own.
+{
+  const crew = [['Ari', '19'], ['Bea', '7'], ['Cal', '21'], ['Dee', '2']].map(([name, no], i) => ({ id: 'j' + i, name, no, aliases: '' }));
+  const ids = (s) => E.parsePlay(s, crew).events.map((e) => e.t + ':' + e.id).join(' ');
+  check(ids('19 to 7 to 21 goal') === 'touch:j0 touch:j1 touch:j2 goal:j2', 'digits: ' + ids('19 to 7 to 21 goal'));
+  check(ids('nineteen to seven, twenty one scores') === 'touch:j0 touch:j1 touch:j2 goal:j2', 'number words: ' + ids('nineteen to seven, twenty one scores'));
+  check(ids('#19 throws to Bea') === 'touch:j0 touch:j1', 'hash number');
+  check(ids('Ari two Bea') === 'touch:j0 touch:j1', '"two" is still "to"');
+  check(ids('number two to Ari') === 'touch:j3 touch:j0', 'number two');
+  const line = E.parseLine('19 and 7 handlers', crew, E.defaultPositions ? E.defaultRules().positions : []);
+  check(line.assign.map((a) => a.id).join() === 'j0,j1', 'jersey numbers in lineups');
+}
+
 // A name that only fits a bench player is matched to the bench.
 {
   const field = ['Jimmy', 'Mickey'].map((name, i) => ({ id: 'f' + i, name, no: '', aliases: '' }));

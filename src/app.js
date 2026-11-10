@@ -17,6 +17,10 @@
   const newPlayer = (name, f) => ({ id: uid(), name, no: '', aliases: '', match: 'M', h: 3, c: 3, d: 3, s: 3, tags: [], target: 'average', minPts: 2, contacts: [], ...f });
 
   let Root = null, S = null, tab = 'game', sel = null, editing = null, seasonView = false, ptView = 'time', pointsSource = 'current', backupText = '', notice = '';
+  let navBack = null, boxSort = null, ptSort = null, editingGame = null, capNotice = null, audioCtx = null;
+  const tableSorts = {};
+  benchFilter = 'all', insight = null, sampler = null;
+  const insightCache = new Map();
   let playerOpen = null, openMic = false, fixLine = false, teamView = 'roster', coachNote = '';
   let editIdx = null, settingsOpen = false, matchResult = null;
   let comboSize = '2', sendFor = null, reportNote = '', downloads = null;
@@ -56,7 +60,7 @@
 
   // Brings data saved by earlier versions forward.
   function migrate(s) {
-    if (s.teams) { s.teams.forEach((t) => { if (t.rules.ratioMode === 'fixed') t.rules.ratioMode = 'call'; t.schedule = t.schedule || []; t.players.forEach((p) => { p.contacts = p.contacts || []; }); }); return s; }
+    if (s.teams) { s.teams.forEach((t) => { if (t.rules.ratioMode === 'fixed') t.rules.ratioMode = 'call'; Object.entries({ timeoutsPerHalf: 2, floaters: 0, softCap: 0, hardCap: 0, timeCap: 0, capAlarms: false }).forEach(([k, v]) => { if (t.rules[k] === undefined) t.rules[k] = v; }); t.schedule = t.schedule || []; t.players.forEach((p) => { p.contacts = p.contacts || []; }); }); return s; }
     s.schedule = s.schedule || [];
     s.players.forEach((p) => { p.contacts = p.contacts || []; });
     if (s.isExample) return freshRoot();
@@ -102,6 +106,8 @@
     if (!window.claude || !window.claude.use) return;
     try {
       downloads = await window.claude.use('downloads');
+      sampler = await window.claude.use('sample');
+      if (sampler) render();
       db = await window.claude.use('db');
       if (!db) return;
       const snap = await db.doc('teams/main').get();
@@ -186,7 +192,7 @@
   const tipAttr = (t) => `data-tip="${esc(t)}"`;
   const seg = (act, value, opts, extra) => `<div class="seg" role="group">${opts.map(([v, l]) => `<button type="button" data-a="${act}" data-v="${v}" ${extra || ''} aria-pressed="${String(v) === String(value)}">${l}</button>`).join('')}</div>`;
   const MODE_HINT = { develop: 'Freshest players and rookies first.', balanced: 'Rotates everyone and keeps skill high.', win: 'Your best seven. Tiredness barely counts.', competitive: 'Your top seven, resting about two a point so they last the game.' };
-  const modeSeg = () => `<div class="mode">${seg('mode', G().mode, [['develop', 'Develop'], ['balanced', 'Balanced'], ['competitive', 'Competitive'], ['win', 'Universe']])}<span class="small muted">${MODE_HINT[G().mode]}</span></div>`;
+  const modeSeg = (small) => `<div class="mode ${small ? 'mode-sm' : ''}">${seg('mode', G().mode, [['develop', 'Develop'], ['balanced', 'Balanced'], ['competitive', 'Competitive'], ['win', 'Universe']])}<span class="small muted">${MODE_HINT[G().mode]}</span></div>`;
   const stepper = (act, value, min, max, extra, shown) => `<span class="step"><button type="button" data-a="${act}" data-d="-1" ${extra || ''} aria-label="Less" ${value <= min ? 'disabled' : ''}>−</button><b>${shown === undefined ? value : shown}</b><button type="button" data-a="${act}" data-d="1" ${extra || ''} aria-label="More" ${value >= max ? 'disabled' : ''}>+</button></span>`;
   const twoTap = (key, act, label, confirmLabel, cls, extra) => `<button type="button" class="btn small-btn ${cls || ''}" data-a="confirm" data-key="${key}" data-then="${act}" ${extra || ''}>${confirmKey === key ? confirmLabel : label}</button>`;
   const FRESH_TIP = { Fresh: 'Fresh: ready for a long point.', OK: 'OK: can play, but has been working.', Tired: 'Tired: needs a rest. A long point now is a risk.' };
@@ -201,32 +207,45 @@
   const matchBadge = (p) => (mixed() ? `<span class="mb ${p.match}" ${tipAttr(S.youth ? `${GL(p.match)}: ${GW(p.match) === 'girls' ? 'girl' : 'boy'}-matching player` : p.match === 'W' ? 'WMP: women-matching player' : 'MMP: men-matching player')}>${GL(p.match)}</span>` : '');
   const tile = (p, small) => `<span class="tile ${mixed() ? p.match : ''} ${small ? 'sm' : ''}" aria-label="Jersey ${esc(p.no || 'not set')}">${esc(p.no || '–')}</span>`;
   // Badge during a game: the player's energy, shading to yellow, orange and red as they tire.
-  const heat = (e) => (e >= 75 ? '' : e >= 65 ? 'h1' : e >= 55 ? 'h2' : e >= 40 ? 'h3' : 'h4');
-  const freshTile = (p, small, ring) => { const e = Math.round(stats().get(p.id).energy); return `<span class="tile ${mixed() ? p.match : ''} ${heat(e)} ${small ? 'sm' : ''} ${ring ? 'pull-ring' : ''}" title="Energy ${e} of 100" aria-label="Energy ${e} of 100">${e}</span>`; };
+  const heat = (e) => (e >= 75 ? 'h0' : e >= 65 ? 'h1' : e >= 55 ? 'h2' : e >= 40 ? 'h3' : 'h4');
+  const freshTile = (p) => { const e = Math.round(stats().get(p.id).energy); return `<span class="fb ${heat(e)}" title="Energy ${e} of 100" aria-label="Energy ${e} of 100">${e}</span>`; };
   const nameTag = (p) => `${p.no ? `<span class="no">#${esc(p.no)}</span> ` : ''}${esc(p.name)}`;
-  const energyKey = '<span class="small muted" title="100 is fully rested. Yellow, orange and red mean tiring.">Badge is energy, out of 100</span>';
+  const energyKey = '<span class="small muted" title="100 is fully rested. Green is fresh; yellow, orange and red mean tiring.">Number is energy, out of 100</span>';
   const ratingTip = (p) => allSkills().map(([k, l]) => `${l} ${E.rate(p, k)}`).join(', ');
   const posAbbr = (id) => (POS(id) ? POS(id).abbr : '?');
 
+  const pLink = (p) => `<button type="button" class="linkish plink" data-a="go-player" data-id="${esc(p.id)}">${esc(p.name)}</button>`;
   const whoName = (id) => (P(id) ? esc(P(id).name) : 'Removed player');
   const evChip = (e, suffix) => (e.t === 'touch' ? `<span class="ev">${whoName(e.id)}${suffix || ''}</span>` : e.t === 'oppturn' ? '<span class="ev stat e-oppturn">Opponent turnover</span>' : `<span class="ev stat e-${e.t}">${Report.label(e)}: ${whoName(e.id)}${suffix || ''}</span>`);
   function narrativeHtml(events, drag, suffix) {
-    return Report.narrative(events).map((it, i) => {
-      const attrs = drag ? `data-drag="ev:${i}" data-evi="${i}"` : '';
+    const items = Report.narrative(events);
+    return items.map((it, i) => {
+      let arrow = '';
+      if (i) {
+        const pass = Report.isPass(items, i), ti = it.idxs[0], tt = pass ? events[ti].throwType : null;
+        const sup = tt ? `<sup ${tipAttr(Report.THROW_NAME[tt])}>${Report.THROW[tt]}</sup>` : '';
+        arrow = pass ? `<span class="muted arrow ${drag ? 'arr-press' : ''}" ${drag ? `data-press="arr:${ti}" title="Hold to mark forehand or backhand"` : ''}> →${sup} </span>` : '<span class="sep" aria-hidden="true"></span>';
+      }
+      return arrow + chipOf(it, i);
+    }).join('');
+    function chipOf(it, i) {
+      const gi = it.role === 'goal' || it.t === 'goal' ? it.idxs.find((k) => events[k].t === 'goal') : undefined;
+      const fixed = gi !== undefined || it.t === 'oppgoal';
+      const attrs = drag ? `${fixed ? '' : `data-drag="ev:${i}" `}data-evi="${i}"${gi !== undefined ? ` data-press="goal:${gi}"` : ''}` : '';
       const q = suffix && it.unsure ? ' ?' : '';
       if (it.t === 'touch' && !it.role) return `<span class="ev" ${attrs}>${whoName(it.id)}${q}</span>`;
-      if (!it.id) return `<span class="ev stat e-${it.t}" ${attrs}>${it.t === 'oppgoal' ? 'Opponent goal' : 'Opponent turnover'}</span>`;
+      if (!it.id) return `<span class="ev stat e-${it.t}" ${attrs}>${Report.oppLabel(it)}</span>`;
       const kind = it.role || it.t;
       return `<span class="ev stat e-${kind}" ${attrs}>${Report.label({ t: kind, sub: it.sub })}: ${whoName(it.id)}${q}</span>`;
-    }).join('<span class="muted arrow"> → </span>');
+    }
   }
   const isPuller = (p) => p.tags.some((t) => t.toLowerCase() === 'puller');
   // Before the pull: Puller-tagged players get a ring, and a hold on a line card picks who pulls.
   const pullOpen = () => { const g = G(); return g.live ? g.live.on === 'D' && !g.live.puller && !g.live.review && !(g.live.events || []).length : ctx().on === 'D'; };
   function lineCard(id, pos) {
     const p = P(id), def = POS(pos), rating = def ? E.rate(p, def.skill) : '', pull = pullOpen();
-    return `<button type="button" class="pc ${sel === id ? 'sel' : ''}" data-a="tap-line" data-id="${id}" data-drag="${id}" ${pull ? `data-press="${id}"` : ''}>
-      ${freshTile(p, false, pull && isPuller(p))}<span class="nm"><span class="tx">${nameTag(p)}</span></span>
+    return `<button type="button" class="pc ${sel === id ? 'sel' : ''} ${pull && isPuller(p) && canPull(p) ? 'pull-ring' : ''}" data-a="tap-line" data-id="${id}" data-drag="${id}" ${pull ? `data-press="${id}"` : ''}>
+      <span class="nm">${freshTile(p)}<span class="tx">${nameTag(p)}</span></span>
       <span class="sub">${matchBadge(p)}<span class="meta"><span ${tipAttr(ratingTip(p))}>${esc(posName(pos))} ${rating}</span></span></span></button>`;
   }
   function benchRow(id, live) {
@@ -234,14 +253,34 @@
     const short = S.rules.positions.slice(0, 3).map((x) => `${x.abbr}${E.rate(p, x.skill)}`).join(' ');
     return `<div class="br ${sel === id ? 'sel' : ''} ${owed >= 0.75 ? 'owed' : ''}">
       <button type="button" class="br-main" data-a="${live ? 'tap-bench-live' : 'tap-bench'}" data-id="${id}" ${live ? '' : `data-drag="${id}"`}>
-      ${freshTile(p)}<span class="nm"><span class="tx">${nameTag(p)}</span></span>
+      <span class="nm">${freshTile(p)}<span class="tx">${nameTag(p)}</span></span>
       <span class="sub">${matchBadge(p)}<span class="meta"><span class="owe" ${tipAttr(owedTip(s))}>${owedText(s)}</span> · ${s.played} pts · <span ${tipAttr(ratingTip(p))}>${short}</span>${p.tags.length ? ' · ' + esc(p.tags.join(', ')) : ''}</span></span></button>
       <button type="button" class="sit" data-a="sit" data-id="${id}" aria-label="${esc(p.name)} is not at this game">Not here</button></div>`;
   }
+  function benchFilters() {
+    const opts = [['all', 'All']];
+    if (mixed()) opts.push(['g:W', GL('W')], ['g:M', GL('M')]);
+    S.rules.positions.forEach((x) => opts.push([`p:${x.id}`, x.name.endsWith('s') ? x.name : x.name + 's']));
+    const tags = S.rules.tags.filter((t) => S.players.some((p) => p.tags.includes(t)));
+    tags.forEach((t) => opts.push([`t:${t}`, t.endsWith('s') ? t : t + 's']));
+    if (tags.some((t) => /^rookie$/i.test(t)) && !tags.some((t) => /^vet/i.test(t))) opts.push(['vets', 'Vets']);
+    if (!opts.some(([k]) => k === benchFilter)) benchFilter = 'all';
+    return `<div class="bench-filters" role="group" aria-label="Show on the bench">${opts.map(([k, l]) => `<button type="button" class="tog" data-a="bench-filter" data-v="${esc(k)}" aria-pressed="${benchFilter === k}">${esc(l)}</button>`).join('')}</div>`;
+  }
+  function benchMatch(id) {
+    const p = P(id), f = benchFilter;
+    if (f === 'all') return true;
+    if (f.startsWith('g:')) return (p.match === 'W') === (f === 'g:W');
+    if (f.startsWith('p:')) { const best = Math.max(...S.rules.positions.map((x) => E.rate(p, x.skill))); const pos = S.rules.positions.find((x) => x.id === f.slice(2)); return pos && E.rate(p, pos.skill) === best; }
+    if (f.startsWith('t:')) return p.tags.includes(f.slice(2));
+    if (f === 'vets') return !p.tags.some((t) => /^rookie$/i.test(t));
+    return true;
+  }
+  const benchList = (ids, live) => { const shown = sortByOwed(ids).filter(benchMatch); return shown.map((id) => benchRow(id, live)).join('') || `<p class="muted">${ids.length ? 'No one on the bench matches this filter.' : 'Everyone available is on the line.'}</p>`; };
   const sortByOwed = (ids) => ids.slice().sort((a, b) => { const x = stats().get(a), y = stats().get(b); return (y.target - y.played) - (x.target - x.played) || y.energy - x.energy; });
 
   function strength(line) {
-    return `<div class="strength">${line.strength.map((v) => `<div class="st" ${tipAttr(`${v.label}: this line averages ${v.line.toFixed(1)}. The tick is your available team at ${v.team.toFixed(1)}.`)}><div class="row"><span>${esc(v.label)}</span><b>${v.line.toFixed(1)}</b></div><div class="meter"><i style="width:${v.line / 5 * 100}%"></i><u style="left:${v.team / 5 * 100}%"></u></div></div>`).join('')}</div>`;
+    return `<div class="strength">${line.strength.map((v) => `<div class="st" ${tipAttr(`${v.label}: this line rates ${v.line.toFixed(1)}. The tick is your available team at ${v.team.toFixed(1)}.${v.note ? ' ' + v.note : ''}`)}><div class="row"><span>${esc(v.label)}</span><b>${v.line.toFixed(1)}</b></div><div class="meter"><i style="width:${v.line / 5 * 100}%"></i><u style="left:${v.team / 5 * 100}%"></u></div></div>`).join('')}</div>`;
   }
   const legend = () => (mixed() ? `<span class="legend small"><span class="tile W sm" aria-hidden="true"></span>${GL('W')} <span class="tile M sm" aria-hidden="true"></span>${GL('M')}</span>` : '');
 
@@ -251,7 +290,7 @@
     const onLabel = c.on === 'O' ? 'Offense' : 'Defense';
     const major = Math.ceil(S.rules.size / 2), minor = Math.floor(S.rules.size / 2);
     const ratioLabel = c.ratio && (c.ratio === 'W' ? `${major} ${GW('W')} / ${minor} ${GW('M')}` : `${major} ${GW('M')} / ${minor} ${GW('W')}`);
-    const atEnd = Math.max(sc.us, sc.them) >= S.rules.gameTo;
+    const atEnd = Math.max(sc.us, sc.them) >= (g.capTo || S.rules.gameTo);
     return `<section class="score" aria-label="Score">
       <div class="nums"><div class="side"><b>${sc.us}</b><span class="team">${esc(S.team)}</span></div><span class="dash">–</span><div class="side"><b>${sc.them}</b><span class="team">${esc(g.opponent || 'Opponent')}</span></div></div>
       <div class="chips">
@@ -262,10 +301,11 @@
         ${c.halftime ? '<span class="chip">After halftime</span>' : ''}
       </div>
       <div class="right">
+        ${CAPS.some(([k]) => rv(k, 0)) ? `<span class="chip gclock" id="gclock">${capClock(g)}</span>` : ''}
         ${g.points.length ? '<button type="button" class="btn small-btn" data-a="edit-prev">Previous point</button>' : ''}
         ${!live && g.points.length ? '<button type="button" class="btn small-btn" data-a="undo">Undo last point</button>' : ''}
         ${twoTap('end', 'end-game', atEnd ? 'Finish game' : 'End game', 'Tap again to end', atEnd ? 'primary' : '')}
-      </div></section>`;
+      </div>${timeoutRow(g)}${capNotice ? `<div class="cap-note" role="alert"><b>${esc(capNotice)}</b><button type="button" class="btn small-btn" data-a="cap-ok">OK</button></div>` : ''}</section>`;
   }
 
   function positionGroups() {
@@ -299,7 +339,7 @@
     const g = G(), list = options(), s = suggestion(), full = placedIds().length >= targetSize();
     const rows = s ? S.rules.positions.map((p) => {
       const ids = s.ids.filter((id) => s.roles[id] === p.id);
-      return ids.length ? `<div class="sug-row"><span class="label" ${tipAttr(p.name)}>${esc(p.abbr)}</span><div class="sug-chips">${ids.map((id) => { const on = !!g.draft.line[id]; return `<button type="button" class="sug ${on ? 'placed' : ''}" data-a="add-sug" data-id="${id}" data-v="${p.id}">${freshTile(P(id), true)}<span>${nameTag(P(id))}</span></button>`; }).join('')}</div></div>` : '';
+      return ids.length ? `<div class="sug-row"><span class="label" ${tipAttr(p.name)}>${esc(p.abbr)}</span><div class="sug-chips">${ids.map((id) => { const on = !!g.draft.line[id]; return `<button type="button" class="sug ${on ? 'placed' : ''}" data-a="add-sug" data-id="${id}" data-v="${p.id}">${freshTile(P(id))}<span>${nameTag(P(id))}</span></button>`; }).join('')}</div></div>` : '';
     }).join('') : '<p class="muted">Mark at least one player as here to get a suggestion.</p>';
     return `<section class="panel suggest" aria-label="Suggested line">
       <div class="panel-head"><h3>Suggested line</h3>${modeSeg()}</div>
@@ -374,8 +414,9 @@
       </div>
       <section class="panel" aria-label="Bench" data-drop="bench">
         <div class="panel-head"><h2>Bench</h2><span class="small muted">Most owed first. Tap to add, or drag.</span></div>
-        <div class="list">${sortByOwed(rest).map((id) => benchRow(id)).join('') || '<p class="muted">Everyone available is on the line.</p>'}</div>
-        ${gone.length ? `<div class="label">Not at this game</div><div class="list">${gone.map((p) => `<button type="button" class="br-main gone" data-a="sit" data-id="${p.id}">${freshTile(p)}<span class="nm"><span class="tx">${nameTag(p)}</span></span><span class="sub small">Tap to bring back</span></button>`).join('')}</div>` : ''}
+        ${benchFilters()}
+        <div class="list">${benchList(rest)}</div>
+        ${gone.length ? `<div class="label">Not at this game</div><div class="list">${gone.map((p) => `<button type="button" class="br-main gone" data-a="sit" data-id="${p.id}"><span class="nm">${freshTile(p)}<span class="tx">${nameTag(p)}</span></span><span class="sub small">Tap to bring back</span></button>`).join('')}</div>` : ''}
       </section>
     </div>`;
   }
@@ -390,19 +431,19 @@
   function compactLine(pv, title) {
     if (!pv.line) return '';
     const onLabel = pv.ctx.on === 'O' ? 'O point' : 'D point';
-    return `<div><h3>${title}</h3><p class="small muted">${onLabel}${pv.ctx.halftime ? ', after halftime' : ''}</p><div class="compact">${S.rules.positions.flatMap((r) => pv.line.ids.filter((id) => pv.line.roles[id] === r.id).map((id) => `<div>${freshTile(P(id), true)}<span class="cn">${nameTag(P(id))}</span><span class="tag" ${tipAttr(r.name)}>${esc(r.abbr)}</span></div>`)).join('')}</div></div>`;
+    return `<div><h3>${title}</h3><p class="small muted">${onLabel}${pv.ctx.halftime ? ', after halftime' : ''}</p><div class="compact">${S.rules.positions.flatMap((r) => pv.line.ids.filter((id) => pv.line.roles[id] === r.id).map((id) => `<div>${freshTile(P(id))}<span class="cn">${nameTag(P(id))}</span><span class="tag" ${tipAttr(r.name)}>${esc(r.abbr)}</span></div>`)).join('')}</div></div>`;
   }
   const liveCount = (id, t) => (activePt().events || []).filter((e) => e.id === id && e.t === t).length;
   function fieldCard(id) {
     const p = P(id), s = stats().get(id), pos = (activePt().roles || {})[id];
     const counts = [['touch', 'T', 'Touches'], ['goal', 'G', 'Goals'], ['assist', 'A', 'Assists'], ['turn', 'TO', 'Turnovers'], ['block', 'B', 'Blocks']].filter(([k]) => liveCount(id, k) > 0);
-    return `<button type="button" class="pc onfield ${sel === id ? 'sel' : ''}" data-a="tap-field" data-id="${id}" data-press="${id}">
-      ${freshTile(p, false, editIdx === null && pullOpen() && isPuller(p))}<span class="nm"><span class="tx">${nameTag(p)}</span></span>
+    return `<button type="button" class="pc onfield ${sel === id ? 'sel' : ''} ${editIdx === null && pullOpen() && isPuller(p) && canPull(p) ? 'pull-ring' : ''}" data-a="tap-field" data-id="${id}" data-press="${id}">
+      <span class="nm">${freshTile(p)}<span class="tx">${nameTag(p)}</span></span>
       <span class="sub">${matchBadge(p)}<span class="meta"><span ${tipAttr(posName(pos))}>${esc(posAbbr(pos))}</span> · ${counts.length ? counts.map(([k, l, name]) => `<span ${tipAttr(`${name} this point`)}><b>${l}${liveCount(id, k)}</b></span>`).join(' ') : 'No touches yet'}</span></span></button>`;
   }
   function chainStrip() {
     const ev = activePt().events || [];
-    const pull = activePt().puller && P(activePt().puller) ? `<span class="ev stat e-pull">Pull: ${whoName(activePt().puller)}</span>${ev.length ? '<span class="muted arrow"> → </span>' : ' '}` : '';
+    const pull = activePt().puller && P(activePt().puller) ? `<span class="ev stat e-pull">Pull: ${whoName(activePt().puller)}</span>${ev.length ? '<span class="sep" aria-hidden="true"></span>' : ' '}` : '';
     const items = narrativeHtml(ev, true);
     return `<div class="chain-row"><div class="chain" aria-live="polite">${pull}${items || '<span class="muted">Tap a player for a touch. Hold for goal, assist, turnover or block.</span>'}</div>${ev.length > 1 ? '<span class="small muted chain-hint">Hold and drag to reorder</span>' : ''}${ev.length ? '<button type="button" class="btn small-btn" data-a="undo-stat">Undo</button>' : ''}<button type="button" class="btn small-btn" data-a="voice-open" data-v="play">Voice</button></div>`;
   }
@@ -411,8 +452,8 @@
     return `${scoreboard(true)}<div class="game">
       <section class="panel"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div>
         ${g.live.review ? `<div class="warns"><b>${g.live.review.result === 'us' ? 'We scored' : 'They scored'}</b><span>Waiting for the point to be finalized.</span></div>` : ''}
-        <div class="label">On the field</div><div class="compact">${onField.map((id) => `<div>${freshTile(P(id), true)}<span class="cn">${nameTag(P(id))}</span></div>`).join('')}</div></section>
-      <section class="panel"><div class="panel-head"><h2>Next up</h2>${modeSeg()}</div><div class="next-cols">${compactLine(pv.us, 'If we score')}${compactLine(pv.them, 'If they score')}</div></section></div>`;
+        <div class="label">On the field</div><div class="compact">${onField.map((id) => `<div>${freshTile(P(id))}<span class="cn">${nameTag(P(id))}</span></div>`).join('')}</div></section>
+      <section class="panel"><div class="panel-head"><h2>Next up</h2>${modeSeg(true)}</div><div class="next-cols">${compactLine(pv.us, 'If we score')}${compactLine(pv.them, 'If they score')}</div></section></div>`;
   }
   function liveScreen() {
     if (role() === 'lines') return linesLive();
@@ -432,13 +473,14 @@
         ${chainStrip()}
         <div class="panel-head"><span class="label">On the field</span>${legend()}${energyKey}</div>
         <div class="cards">${onField.map(fieldCard).join('')}</div>
-        <div class="panel-foot"><span class="chips">${twoTap('cancel-pt', 'cancel-point', 'Cancel this point', 'Tap again to cancel')}<button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></div>
+        <div class="panel-foot"><span class="chips">${twoTap('cancel-pt', 'cancel-point', 'Cancel this point', 'Tap again to cancel')}<button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><span class="chips">${!g.live.review && Report.holder(g.live) === 'them' ? '<button type="button" class="btn small-btn opp" data-a="opp-pass">Opponent pass</button>' : ''}<button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></span></div>
       </section>
       <section class="panel" data-drop="none">
-        ${role() === 'events' ? '' : `<div class="panel-head"><h2>Next up</h2>${modeSeg()}</div>
+        ${role() === 'events' ? '' : `<div class="panel-head"><h2>Next up</h2>${modeSeg(true)}</div>
         <div class="next-cols">${compactLine(pv.us, 'If we score')}${compactLine(pv.them, 'If they score')}</div>`}
         <div class="label">Bench</div>
-        <div class="list">${sortByOwed(rest).map((id) => benchRow(id, true)).join('')}</div>
+        ${benchFilters()}
+        <div class="list">${benchList(rest, true)}</div>
       </section>
     </div>`;
   }
@@ -458,7 +500,7 @@
       <div class="panel-head"><span class="label">On the field</span>${legend()}</div>
       <div class="cards">${onField.map(fieldCard).join('')}</div>
       ${fixLine ? `<div class="label">Not on the field</div><div class="list">${S.players.filter((x) => !onField.includes(x.id)).map((x) => benchRow(x.id, true)).join('')}</div>` : ''}
-      <div class="panel-foot"><span class="chips"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></div>
+      <div class="panel-foot"><span class="chips"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><span class="chips"><button type="button" class="btn small-btn opp" data-a="opp-pass">Opponent pass</button><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></span></div>
     </section>`;
   }
 
@@ -474,18 +516,21 @@
       <div class="form-row"><label class="field grow"><span class="label">Opponent</span><input id="opp" type="text" data-c="setup-opp" value="${esc(s.opponent)}" placeholder="Opponent name" autocomplete="off"></label>
       <div class="field"><span class="label">First point we play</span>${seg('setup-on', s.startOn, [['O', 'Offense'], ['D', 'Defense']])}</div>
       ${gendzone() ? `<div class="field"><span class="label">Starts in the gendzone</span>${seg('gendzone-first', s.gendzoneUs === false ? 'them' : 'us', [['us', 'Us'], ['them', 'Them']])}</div>` : ''}</div>
-      <div class="field"><span class="label">Who's here? ${here} of ${S.players.length}</span><div class="attend">${S.players.map((p) => `<button type="button" class="tog" data-a="setup-out" data-id="${p.id}" aria-pressed="${!s.out[p.id]}">${esc(p.name)}</button>`).join('')}</div></div>
-      <button type="button" class="btn go" data-a="start-game" ${here ? '' : 'disabled'}>Start game</button></section>`;
+      <div class="field"><span class="label">Who's here? ${here} of ${S.players.length}</span><div class="attend">${S.players.map((p) => { const r = s.scheduleId && (S.rsvpAnswers || {})[`${s.scheduleId}_${p.id}`]; return `<button type="button" class="tog" data-a="setup-out" data-id="${p.id}" aria-pressed="${!s.out[p.id]}">${esc(p.name)}${r ? ` <span class="rsvp-mark rsvp-${r.status}" title="RSVP: ${r.status}">${r.status === 'yes' ? '✓' : r.status === 'no' ? '✗' : '?'}</span>` : ''}</button>`; }).join('')}</div></div>
+      <button type="button" class="btn go" data-a="start-game" ${here ? '' : 'disabled'}>Start game</button></section>
+    <section class="panel"><details class="setup-rules"><summary><h2>Game Rules</h2><span class="small muted">${S.rules.size} a side · to ${S.rules.gameTo} · half at ${S.rules.halfAt}${S.rules.division === 'mixed' ? ' · mixed' : ''}</span></summary>${gameRulesBody()}<p class="small muted">These are this team's rules; changes here also show on the Rules tab.</p></details></section>`;
   }
 
   /* ---------- Roster ---------- */
   function teamsPanel() {
-    return `<section class="panel"><div class="panel-head"><h2>Teams</h2></div>
+    return `<section class="panel"><div class="panel-head"><h2>Teams</h2><span class="right">${S.history.length || (S.game && S.game.points.length) ? insightBtn('team', S.id, 'Team insights') : ''}</span></div>
       <div class="taglist">${Root.teams.map((t) => `<button type="button" class="tog" data-a="switch-team" data-v="${t.id}" aria-pressed="${t.id === S.id}">${esc(t.team)}${t.game ? ' · in game' : ''}</button>`).join('')}</div>
       <div class="form-row"><label class="field grow"><span class="label">This team's name</span><input id="team-name" type="text" data-c="team" value="${esc(S.team)}" autocomplete="off"></label>
       ${Root.teams.length > 1 && isAdmin() ? twoTap('delteam-' + S.id, 'delete-team', 'Delete team', 'Tap again to delete', 'danger') : ''}</div>
       <form class="form-row" data-form="team"><label class="field grow"><span class="label">New team</span><input id="new-team" type="text" placeholder="Team name" autocomplete="off"></label><button class="btn primary" type="submit">Add team</button></form>
       <label class="check"><input type="checkbox" data-c="youth" ${S.youth ? 'checked' : ''}> Youth team <span class="small muted">(Gx/Bx instead of WMP/MMP)</span></label>
+      ${isAdmin() ? `<div class="form-row brand-row"><label class="field"><span class="label">Team color</span><input type="color" data-c="team-color" value="${Report.safeColor(S.color)}"></label>
+        <div class="field"><span class="label">Logo</span><div class="chips">${S.logo ? `<img class="logo-prev" src="${S.logo}" alt="Team logo">` : ''}<label class="btn small-btn file-btn">${S.logo ? 'Change logo' : 'Upload logo'}<input type="file" accept="image/*" data-c="team-logo" hidden></label>${S.logo ? '<button type="button" class="btn small-btn" data-a="logo-remove">Remove</button>' : ''}</div></div></div>` : (S.logo ? `<img class="logo-prev" src="${S.logo}" alt="Team logo">` : '')}
       <p class="small muted">A new team starts with this team's rules and an empty roster.</p></section>`;
   }
   const longDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
@@ -494,14 +539,27 @@
   function gamesPanel() {
     const list = S.schedule.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
     const upcoming = list.filter((x) => !x.gameId), played = list.filter((x) => x.gameId).reverse();
-    const row = (x) => `<div class="game-row"><div class="game-info"><strong>${esc(longDate(x.date))}${x.time ? ' · ' + esc(x.time) : ''} vs ${esc(x.opponent || 'Opponent')}</strong>${x.location ? `<span class="small muted">${esc(x.location)}</span>` : ''}${x.gameId ? `<span class="small">Final ${x.us}–${x.them}</span>` : ''}</div>
-      <div class="chips">${x.gameId ? `<button type="button" class="btn small-btn" data-a="send-open">Send report</button>${(S.history.find((h) => h.id === x.gameId) || {}).points ? twoTap('reopen-' + x.id, 'reopen-game', 'Reopen', 'Tap again to reopen', '', `data-id="${x.gameId}" ${S.game ? 'disabled' : ''}`) : ''}` : `<button type="button" class="btn small-btn primary" data-a="start-scheduled" data-id="${x.id}" ${S.game ? 'disabled' : ''}>Start</button>`}${twoTap('delgame-' + x.id, 'del-schedule', 'Remove', 'Tap again', 'danger', `data-id="${x.id}"`)}</div></div>`;
-    return `<section class="panel"><h2>${esc(S.team)} games</h2>
+    const rsvpOf = (x) => { const ans = Object.values(S.rsvpAnswers || {}).filter((v) => v.game === x.id && P(v.player)); if (!ans.length) return ''; const n = (s) => ans.filter((v) => v.status === s).length; return `<details class="rsvp-list"><summary class="small">RSVP: ${n('yes')} yes · ${n('no')} no · ${n('maybe')} maybe</summary>${ans.map((v) => `<span class="small rsvp-${v.status}">${esc(P(v.player).name)}: ${v.status}${v.note ? ` (${esc(v.note)})` : ''}</span>`).join('')}</details>`; };
+    const editRow = (x) => `<form class="form-row game-edit" data-form="schedule-edit" data-id="${x.id}"><label class="field grow"><span class="label">Opponent</span><input id="se-opp" type="text" value="${esc(x.opponent || '')}" autocomplete="off" required></label><label class="field"><span class="label">Date</span><input id="se-date" type="date" value="${esc(x.date || '')}" required></label><label class="field"><span class="label">Time</span><input id="se-time" type="text" value="${esc(x.time || '')}" placeholder="10:00 AM" autocomplete="off"></label><label class="field grow"><span class="label">Location</span><input id="se-loc" type="text" value="${esc(x.location || '')}" autocomplete="off"></label><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-a="game-edit" data-id="">Cancel</button></form>`;
+    const row = (x) => editingGame === x.id ? editRow(x) : `<div class="game-row"><div class="game-info"><strong>${esc(longDate(x.date))}${x.time ? ' · ' + esc(x.time) : ''} vs ${esc(x.opponent || 'Opponent')}</strong>${x.location ? `<span class="small muted">${esc(x.location)}</span>` : ''}${x.gameId ? `<span class="small">Final ${x.us}–${x.them}</span>` : ''}${x.gameId ? '' : rsvpOf(x)}</div>
+      <div class="chips">${x.gameId ? `<button type="button" class="btn small-btn" data-a="send-open">Send report</button>${(S.history.find((h) => h.id === x.gameId) || {}).points ? twoTap('reopen-' + x.id, 'reopen-game', 'Reopen', 'Tap again to reopen', '', `data-id="${x.gameId}" ${S.game ? 'disabled' : ''}`) : ''}` : `<button type="button" class="btn small-btn primary" data-a="start-scheduled" data-id="${x.id}" ${S.game ? 'disabled' : ''}>Start</button>`}<button type="button" class="btn small-btn" data-a="game-edit" data-id="${x.id}">Edit</button>${twoTap('delgame-' + x.id, 'del-schedule', 'Remove', 'Tap again', 'danger', `data-id="${x.id}"`)}</div></div>`;
+    return `<section class="panel"><h2>${esc(S.team)} games</h2>${rsvpPanel()}
       <form class="form-row" data-form="schedule"><label class="field grow"><span class="label">Opponent</span><input id="sch-opp" type="text" autocomplete="off" required></label>
       <label class="field"><span class="label">Date</span><input id="sch-date" type="date" required></label><label class="field"><span class="label">Time</span><input id="sch-time" type="text" placeholder="10:00 AM" autocomplete="off"></label>
       <label class="field grow"><span class="label">Location</span><input id="sch-loc" type="text" autocomplete="off"></label><button class="btn primary" type="submit">Add game</button></form>
       ${upcoming.length ? `<div class="label">Upcoming</div>${upcoming.map(row).join('')}` : '<p class="muted">No upcoming games.</p>'}
       ${played.length ? `<div class="label">Played</div>${played.map(row).join('')}` : ''}</section>`;
+  }
+  // Players whose family said no start the game marked as not here.
+  const rsvpOut = (gameId) => Object.fromEntries(Object.values(S.rsvpAnswers || {}).filter((v) => v.game === gameId && v.status === 'no').map((v) => [v.player, true]));
+  const rsvpKey = () => { const c = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'; const b = new Uint8Array(22); crypto.getRandomValues(b); return [...b].map((x) => c[x % c.length]).join(''); };
+  const rsvpUrl = () => `${window.SITE_URL || ''}rsvp.html#${S.rsvpKey}`;
+  function rsvpPanel() {
+    if (!CloudLink || S.isExample) return '';
+    if (!CloudLink.user) return '<p class="small muted">Sign in (Settings) to make an RSVP link families can use.</p>';
+    if (!S.rsvpKey) return '<div class="chips"><button type="button" class="btn small-btn" data-a="rsvp-make">Make an RSVP link</button><span class="small muted">Families open it to say who\'s coming to each game. No sign-in needed.</span></div>';
+    const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+    return `<div class="rsvp-box"><label class="field grow"><span class="label">RSVP link for families</span><input type="text" readonly value="${esc(rsvpUrl())}" data-select="1"></label><div class="chips"><button type="button" class="btn small-btn" data-a="rsvp-copy">Copy link</button>${native ? '<button type="button" class="btn small-btn" data-a="rsvp-share">Share</button>' : ''}${twoTap('rsvp-new', 'rsvp-reset', 'New link', 'Tap again: old link stops working', 'danger')}</div><p class="small muted">Anyone with the link can see the schedule and the roster names, and answer for any player.</p></div>`;
   }
   function subscribersPanel() {
     const rows = S.players.flatMap((p) => (p.contacts || []).map((c) => `<div class="sub-row"><span><strong>${esc(c.name || c.email)}</strong> <span class="small muted">${esc(c.relation)} of ${esc(p.name)} · ${esc(c.email)}</span></span><button type="button" class="tog here" data-a="toggle-sub" data-id="${p.id}" data-v="${c.id}" aria-pressed="${c.subscribed}">${c.subscribed ? 'Subscribed' : 'Off'}</button></div>`));
@@ -555,15 +613,18 @@
   /* ---------- Playtime and stats ---------- */
   const STAT_KEYS = [['touch', 'Touches'], ['goal', 'Goals'], ['assist', 'Assists'], ['turn', 'Turnovers'], ['drop', 'Drops'], ['block', 'Blocks']];
   function statTotals(season) {
-    const g = G(), totals = new Map(S.players.map((p) => [p.id, { played: 0, O: 0, D: 0, ms: 0, games: 0, touch: 0, goal: 0, assist: 0, turn: 0, drop: 0, block: 0 }]));
+    const g = G(), totals = new Map(S.players.map((p) => [p.id, { played: 0, O: 0, D: 0, ms: 0, games: 0, touch: 0, goal: 0, comp: 0, rec: 0, assist: 0, turn: 0, drop: 0, block: 0 }]));
+    const passing = (points) => Report.totals(points || []).forEach((v, id) => { const t = totals.get(id); if (t) { t.comp += v.comp; t.rec += v.rec; } });
     const add = (id, v) => { const t = totals.get(id); if (!t) return; t.played += v.played || 0; t.O += v.O || 0; t.D += v.D || 0; t.ms += v.ms || 0; if (v.played) t.games += 1; STAT_KEYS.forEach(([k]) => { t[k] += v[k] || 0; }); };
-    if (season) S.history.forEach((h) => Object.entries(h.perPlayer).forEach(([id, v]) => add(id, v)));
+    if (season) S.history.forEach((h) => { Object.entries(h.perPlayer).forEach(([id, v]) => add(id, v)); passing(h.points); });
     if (g) {
       stats().forEach((s, id) => add(id, s));
+      passing(g.points);
       if (g.live) g.live.events.forEach((e) => { const t = totals.get(e.id); if (t && t[e.t] !== undefined) t[e.t] += 1; if (t && e.t === 'turn' && e.sub === 'drop') t.drop += 1; });
     }
     return totals;
   }
+  const ptHead = (k, label, cls, st) => `<span class="${cls}"><button type="button" class="sorth" data-a="pt-sort" data-v="${k}" ${st.key === k ? `aria-sort="${st.dir < 0 ? 'descending' : 'ascending'}"` : ''}>${label}${st.key === k ? (st.dir < 0 ? ' ▾' : ' ▴') : ''}</button></span>`;
   function playtimeScreen() {
     const g = G(), showSeason = seasonView || !g;
     const viewSeg = seg('pt-view', ptView, [['time', 'Playtime'], ['stats', 'Box Score'], ['points', 'Points'], ['sheet', 'Scoresheet'], ['combos', 'Combos']]);
@@ -577,14 +638,17 @@
       const totals = statTotals(true);
       const max = Math.max(1, ...[...totals.values()].map((t) => t.played));
       const avg = [...totals.values()].reduce((a, t) => a + t.played, 0) / Math.max(1, totals.size);
-      body = `<div class="pt head"><span>Player</span><span>Points (tick is team average, ${avg.toFixed(1)})</span><span class="r">Points</span><span class="r opt">Games</span><span class="r">Min</span><span></span></div>` +
-        S.players.slice().sort((a, b) => totals.get(b.id).played - totals.get(a.id).played).map((p) => { const t = totals.get(p.id); return `<div class="pt"><span class="nm">${esc(p.name)}</span><div class="meter"><i style="width:${t.played / max * 100}%"></i><u style="left:${avg / max * 100}%"></u></div><span class="r">${t.played}</span><span class="r opt">${t.games}</span><span class="r">${Math.round(t.ms / E.MIN)}</span><span></span></div>`; }).join('');
+      const sv = (p, k) => { const t = totals.get(p.id); return k === 'games' ? t.games : k === 'min' ? t.ms : t.played; };
+      const st = ptSort && ['name', 'played', 'games', 'min'].includes(ptSort.key) ? ptSort : { key: 'played', dir: -1 };
+      body = `<div class="pt head">${ptHead('name', 'Player', '', st)}<span>Points (tick is team average, ${avg.toFixed(1)})</span>${ptHead('played', 'Points', 'r', st)}${ptHead('games', 'Games', 'r opt', st)}${ptHead('min', 'Min', 'r', st)}<span></span></div>` +
+        S.players.slice().sort((a, b) => (st.key === 'name' ? st.dir * a.name.localeCompare(b.name) : st.dir * (sv(a, st.key) - sv(b, st.key))) || totals.get(b.id).played - totals.get(a.id).played).map((p) => { const t = totals.get(p.id); return `<div class="pt"><span class="nm">${pLink(p)}</span><div class="meter"><i style="width:${t.played / max * 100}%"></i><u style="left:${avg / max * 100}%"></u></div><span class="r">${t.played}</span><span class="r opt">${t.games}</span><span class="r">${Math.round(t.ms / E.MIN)}</span><span></span></div>`; }).join('');
       if (!S.history.length && !g) body += '<p class="muted">Finished games add up here.</p>';
     } else {
       const st = stats();
+      const gs = ptSort && ['name', 'played', 'O', 'ms', 'energy'].includes(ptSort.key) ? ptSort : { key: 'owed', dir: -1 };
       const max = Math.max(1, ...[...st.values()].flatMap((s) => [s.played, s.target]));
-      body = `<div class="pt head"><span>Player</span><span>Points (tick is target)</span><span class="r">Pts / target</span><span class="r opt">O / D</span><span class="r">Time</span><span>Energy</span></div>` +
-        S.players.slice().sort((a, b) => (st.get(b.id).target - st.get(b.id).played) - (st.get(a.id).target - st.get(a.id).played)).map((p) => { const s = st.get(p.id), minP = E.minPointsOf(p), under = s.played < minP; return `<div class="pt"><span class="nm"><span class="tx">${esc(p.name)}</span></span><div class="meter" ${tipAttr(`${s.played} played, target ${s.target.toFixed(1)}, minimum ${minP}`)}><i style="width:${s.played / max * 100}%"></i><u style="left:${s.target / max * 100}%"></u></div><span class="r ${under ? 'under' : ''}">${s.played} / ${s.target.toFixed(1)}</span><span class="r opt">${s.O} / ${s.D}</span><span class="r">${clock(s.ms)}</span>${freshPill(s.energy)}</div>`; }).join('');
+      body = `<div class="pt head">${ptHead('name', 'Player', '', gs)}<span>Points (tick is target)</span>${ptHead('played', 'Pts / target', 'r', gs)}${ptHead('O', 'O / D', 'r opt', gs)}${ptHead('ms', 'Time', 'r', gs)}${ptHead('energy', 'Energy', '', gs)}</div>` +
+        S.players.slice().sort((a, b) => (gs.key === 'name' ? gs.dir * a.name.localeCompare(b.name) : gs.key === 'owed' ? gs.dir * ((st.get(a.id).target - st.get(a.id).played) - (st.get(b.id).target - st.get(b.id).played)) : gs.dir * (st.get(a.id)[gs.key] - st.get(b.id)[gs.key])) || a.name.localeCompare(b.name)).map((p) => { const s = st.get(p.id), minP = E.minPointsOf(p), under = s.played < minP; return `<div class="pt"><span class="nm"><span class="tx">${pLink(p)}</span></span><div class="meter" ${tipAttr(`${s.played} played, target ${s.target.toFixed(1)}, minimum ${minP}`)}><i style="width:${s.played / max * 100}%"></i><u style="left:${s.target / max * 100}%"></u></div><span class="r ${under ? 'under' : ''}">${s.played} / ${s.target.toFixed(1)}</span><span class="r opt">${s.O} / ${s.D}</span><span class="r">${clock(s.ms)}</span>${freshPill(s.energy)}</div>`; }).join('');
     }
     return `<section class="panel"><div class="panel-head"><h2>Playtime</h2>${toggle}</div><div>${body}</div></section>${matchPanel(showSeason)}`;
   }
@@ -599,6 +663,13 @@
   }
   const pickSource = (sources) => sources.find((x) => x.key === pointsSource) || sources[0];
   const sourceSelect = (sources, src) => `<label class="field"><span class="label">Game</span><select id="points-src" data-c="points-src">${sources.map((x) => `<option value="${esc(x.key)}" ${x === src ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select></label>`;
+  const gameRec = (key) => (key === 'current' ? S.game : S.history.find((h) => h.id === key));
+  function videoRow(key) {
+    const rec = gameRec(key);
+    if (!rec) return '';
+    const url = Report.videoUrl(rec.video);
+    return `<div class="form-row video-row"><label class="field grow"><span class="label">YouTube link</span><input type="url" inputmode="url" data-c="video" data-k="${esc(key)}" value="${esc(rec.video || '')}" placeholder="https://youtu.be/..." autocomplete="off"></label>${url ? `<a class="btn small-btn" href="${esc(url)}" target="_blank" rel="noopener">▶ Watch</a>` : ''}</div>`;
+  }
   const viewHead = (title, viewSeg) => `<div class="panel-head"><h2>${title}</h2><span class="right">${viewSeg}</span></div>`;
 
   function pointsScreen(viewSeg) {
@@ -609,28 +680,29 @@
       p.result === 'us' ? us++ : them++;
       const name = (id) => (P(id) ? esc(P(id).name) : 'Removed player');
       const ev = p.events || [], goal = ev.find((e) => e.t === 'goal'), assist = ev.find((e) => e.t === 'assist');
-      const by = p.result === 'us' ? (goal && P(goal.id) ? nameTag(P(goal.id)) : 'We scored') : 'Opponent';
+      const by = p.result === 'us' ? (goal && P(goal.id) ? `${goal.sub === 'callahan' ? 'Callahan' : 'Goal'}: ${nameTag(P(goal.id))}` : 'We scored') : 'Opponent goal';
       const poss = Report.possession(p);
       const tally = (title, match) => { const m = new Map(); ev.filter(match).forEach((e) => { if (e.id) m.set(e.id, (m.get(e.id) || 0) + 1); }); return m.size ? `<span><b>${title}:</b> ${[...m].map(([id, n]) => `${name(id)} ${n}`).join(', ')}</span>` : ''; };
-      const opp = ev.filter((e) => e.t === 'oppturn').length;
+      // Blocks, interceptions and Callahans are opponent turnovers too.
+      const opp = ev.filter((e) => e.t === 'oppturn' || e.t === 'block' || (e.t === 'goal' && e.sub === 'callahan')).length;
       const notes = [tally('Throwaways', (e) => e.t === 'turn' && e.sub !== 'drop'), tally('Drops', (e) => e.t === 'turn' && e.sub === 'drop'), tally('Blocks', (e) => e.t === 'block' && e.sub !== 'int'), tally('Interceptions', (e) => e.t === 'block' && e.sub === 'int'), opp ? `<span><b>Opponent turnovers:</b> ${opp}</span>` : ''].join('');
       const chips = p.lineup.filter((id) => P(id)).map((id) => `<span class="sug static">${tile(P(id), true)}<span>${name(id)}</span><span class="tag small muted" ${tipAttr(posName((p.roles || {})[id]))}>${esc(posAbbr((p.roles || {})[id]))}</span></span>`).join('');
-      const events = (p.puller && P(p.puller) ? `<span class="ev stat e-pull">Pull: ${name(p.puller)}</span>${p.events && p.events.length ? '<span class="muted arrow"> → </span>' : ''}` : '') + narrativeHtml(p.events);
+      const events = (p.puller && P(p.puller) ? `<span class="ev stat e-pull">Pull: ${name(p.puller)}</span>${p.events && p.events.length ? '<span class="sep" aria-hidden="true"></span>' : ''}` : '') + narrativeHtml(p.events);
       const subs = (p.subs || []).map((s) => `${name(s.in)} in for ${name(s.out)}`).join(', ');
       return `<article class="pp">
         <div class="pg"><span class="pg-no">${i + 1}</span><span class="pg-score ${p.result}">${us} - ${them}</span>
           <div class="pg-by"><strong>${by}</strong>${assist && P(assist.id) ? `<span class="small muted">Assist: ${nameTag(P(assist.id))}</span>` : ''}</div>
           <span class="pg-start on${p.on}" title="${p.on === 'O' ? 'Started on offense' : 'Started on defense'}">${p.on}</span>
-          ${Report.possessionBar(p)}
-          <div class="pg-len"><b>${clock(p.endedAt - p.startedAt)}</b><span class="small muted">${poss.catches} ${poss.catches === 1 ? 'catch' : 'catches'}</span></div>
+          ${Report.possessionBar(p, S.color)}
+          <div class="pg-len"><b>${clock(p.endedAt - p.startedAt)}</b><span class="small muted">${poss.catches} ${poss.catches === 1 ? 'catch' : 'catches'}</span>${poss.oppPasses ? `<span class="small muted">${poss.oppPasses} opp. ${poss.oppPasses === 1 ? 'pass' : 'passes'}</span>` : ''}</div>
           <div class="pg-notes small">${notes || '<span class="muted">No turnovers or blocks</span>'}</div>
           ${src.key === 'current' ? `<button type="button" class="btn small-btn pg-edit" data-a="edit-point" data-v="${i}">Edit</button>` : ''}</div>
         <div class="sug-chips">${chips}</div>
-        ${events ? `<div class="chain">${events}</div>` : ''}${subs ? `<p class="small muted">Subs: ${subs}</p>` : ''}</article>`;
-    }).reverse().join('');
-    const pgHead = rows ? '<div class="pg pg-head"><span>#</span><span>Score</span><span>Scored by</span><span>Start</span><span>Disc possession (bar is the whole point)</span><span></span><span>Turnovers and blocks</span></div><p class="small muted pg-key"><i class="us"></i> Our disc <i class="them"></i> Their disc · B block · I interception · T turnover</p>' : '';
+        ${events ? `<div class="chain quiet">${events}</div>` : ''}${subs ? `<p class="small muted">Subs: ${subs}</p>` : ''}</article>`;
+    }).join('');
+    const pgHead = rows ? `<div class="pg pg-head"><span>#</span><span>Score</span><span>Scored by</span><span>Start</span><span>Disc possession (bar is the whole point)</span><span></span><span>Turnovers and blocks</span></div><p class="small muted pg-key"><i class="us" style="background:${Report.safeColor(S.color)}"></i> Our disc <i class="them"></i> Their disc · B block · I interception · T turnover</p>` : '';
     const reopen = src.key !== 'current' ? `<div>${twoTap('reopen-p-' + src.key, 'reopen-game', 'Reopen this game to edit', 'Tap again to reopen', '', `data-id="${src.key}" ${G() ? 'disabled' : ''}`)}${G() ? ' <span class="small muted">Finish the game in progress first.</span>' : ''}</div>` : '';
-    return `<section class="panel">${head}${sourceSelect(sources, src)}${reopen}${pgHead}${rows || '<p class="muted">No points played yet.</p>'}</section>`;
+    return `<section class="panel">${head}${sourceSelect(sources, src)}${videoRow(src.key)}${reopen}${pgHead}${rows || '<p class="muted">No points played yet.</p>'}</section>`;
   }
 
   /* Handlers first, then cutters; each split by matchup on a mixed team. */
@@ -665,8 +737,8 @@
     let u = 0, t = 0;
     const scores = pts.map((p) => { p.result === 'us' ? u++ : t++; return `${u}-${t}`; });
     const heads = pts.map((p, i) => `<th class="${p.result === 'us' ? 'us' : ''}">${i + 1}</th>`).join('');
-    const body = sheetGroups(pts).filter(([, list]) => list.length).map(([label, list]) => `<tr class="ss-group"><th class="ss-name">${label}</th><td colspan="${pts.length}"></td></tr>` + list.map((p) => `<tr><th class="ss-name"><span class="ss-who">${tile(p, true)}<span>${esc(p.name)}</span></span></th>${pts.map((pt, i) => `<td class="${pt.result === 'us' ? 'us' : ''}" aria-label="${sets[i].has(p.id) ? 'Played' : 'Sat'} point ${i + 1}">${sets[i].has(p.id) ? slash(weights[i]) : ''}${marks(pt, p.id)}</td>`).join('')}</tr>`).join('')).join('');
-    return `<section class="panel landscape">${head}${sourceSelect(sources, src)}
+    const body = sheetGroups(pts).filter(([, list]) => list.length).map(([label, list]) => `<tr class="ss-group"><th class="ss-name">${label}</th><td colspan="${pts.length}"></td></tr>` + list.map((p) => `<tr><th class="ss-name"><span class="ss-who">${tile(p, true)}<span>${pLink(p)}</span></span></th>${pts.map((pt, i) => `<td class="${pt.result === 'us' ? 'us' : ''}" aria-label="${sets[i].has(p.id) ? 'Played' : 'Sat'} point ${i + 1}">${sets[i].has(p.id) ? slash(weights[i]) : ''}${marks(pt, p.id)}</td>`).join('')}</tr>`).join('')).join('');
+    return `<section class="panel landscape">${head}${sourceSelect(sources, src)}${pts.length ? '<div class="chips"><button type="button" class="btn small-btn" data-a="print-sheet">Printable PDF</button></div>' : ''}
       <p class="small muted ss-key">${slash('short')} short point ${slash('')} typical ${slash('long')} long point <span class="ss-tint"></span> we scored · <b class="mk mk-a">A</b> assist <b class="mk mk-g">G</b> goal <b class="mk mk-t">T</b> turnover <b class="mk mk-d">D</b> block</p>
       ${pts.length ? `<div class="tbl-wrap"><table class="ss"><thead><tr><th class="ss-name">Point</th>${heads}</tr><tr><th class="ss-name">Started on</th>${pts.map((p) => `<th class="${p.result === 'us' ? 'us' : ''}">${p.on}</th>`).join('')}</tr></thead><tbody>${body}</tbody><tfoot><tr><th class="ss-name">Score</th>${scores.map((s, i) => `<td class="${pts[i].result === 'us' ? 'us' : ''}">${s}</td>`).join('')}</tr></tfoot></table></div>` : '<p class="muted">No points played yet.</p>'}</section>`;
   }
@@ -676,11 +748,11 @@
     const options = `<option value="season" ${season ? 'selected' : ''}>Season</option>`;
     if (season) {
       const totals = statTotals(true);
-      return `<section class="panel">${head}<label class="field"><span class="label">Show</span><select id="points-src" data-c="points-src">${options}${sources.map((x) => `<option value="${esc(x.key)}">${esc(x.label)}</option>`).join('')}</select></label><h3>Season</h3>${Report.statTable(S.players, totals, { label: 'Games', value: (p) => totals.get(p.id).games })}<p class="small muted">Points are total (offense/defense).</p></section>`;
+      return `<section class="panel">${head}<label class="field"><span class="label">Show</span><select id="points-src" data-c="points-src">${options}${sources.map((x) => `<option value="${esc(x.key)}">${esc(x.label)}</option>`).join('')}</select></label><div class="chips">${S.history.length ? insightBtn('team', S.id, 'Season insights') : ''}</div><h3>Season</h3>${Report.statTable(S.players, totals, { label: 'Games', value: (p) => totals.get(p.id).games }, { link: true, sortable: true, sort: boxSort, time: true })}<p class="small muted">Points are total (offense/defense).</p></section>`;
     }
     const src = pickSource(sources);
     return `<section class="panel">${head}<label class="field"><span class="label">Show</span><select id="points-src" data-c="points-src">${options}${sources.map((x) => `<option value="${esc(x.key)}" ${x === src ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select></label>
-      <h3>Point flow</h3>${Report.lineScore(src.points, S.team, src.opponent)}<h3>Box score</h3>${Report.boxTable(src.points, S.players)}<p class="small muted">Points are total (offense/defense).</p></section>`;
+      ${videoRow(src.key)}<div class="chips">${insightBtn('game', src.key, 'Game insights')}</div><h3>Point flow</h3>${Report.lineScore(src.points, S.team, src.opponent)}${src.points.length ? `<h3>Team stats</h3>${Report.teamTable(src.points, S.team, src.opponent)}` : ''}<h3>Box score</h3>${Report.boxTable(src.points, S.players, { link: true, sortable: true, sort: boxSort, time: true })}<p class="small muted">Points are total (offense/defense).</p></section>`;
   }
   function matchPanel(season) {
     const g = G();
@@ -707,8 +779,10 @@
     const sizes = comboSize === '4' ? [4, 5, 6, 7] : [Number(comboSize)];
     const list = Report.combos(pts, sizes).slice(0, 40);
     const nameOf = (id) => (P(id) ? P(id).name : 'Removed player');
-    const rows = list.map((c) => `<tr><td class="bx-name cb-names">${c.ids.map((id) => esc(nameOf(id))).join(', ')}</td><td>${c.pts}</td><td>${c.scored}–${c.allowed}</td><td><b>${c.net > 0 ? '+' : ''}${c.net}</b></td><td>${c.O ? `${c.Owon}/${c.O}` : '–'}</td><td>${c.D ? `${c.Dwon}/${c.D}` : '–'}</td></tr>`).join('');
     const passes = Report.passes(pts);
+    const between = (ids) => ids.reduce((s, x) => s + ids.reduce((t, y) => t + ((x !== y && passes.get(x) && passes.get(x).get(y)) || 0), 0), 0);
+    const together = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
+    const rows = list.map((c) => `<tr><td class="bx-name cb-names">${c.ids.map((id) => (P(id) ? pLink(P(id)) : 'Removed player')).join(', ')}</td><td data-v="${c.pts}">${c.pts} (${c.O}/${c.D})</td><td data-v="${c.ms}">${together(c.ms)} (${clock(c.ms / c.pts)})</td><td>${c.scored}</td><td>${c.allowed}</td><td><b>${c.net > 0 ? '+' : ''}${c.net}</b></td><td>${between(c.ids)}</td></tr>`).join('');
     const volume = new Map();
     passes.forEach((row, a) => row.forEach((n, b) => { volume.set(a, (volume.get(a) || 0) + n); volume.set(b, (volume.get(b) || 0) + n); }));
     const ids = [...volume.keys()].filter(P).sort((a, b) => volume.get(b) - volume.get(a));
@@ -728,22 +802,143 @@
     const biasNote = !mixed() ? '' : bias.length ? `<div class="warns"><b>Biggest gaps in who they throw to</b>${bias.map((b) => `<span>${esc(nameOf(b.id))}: ${b.toW} of ${b.throws} throws to ${GL('W')} players (${pctOf(b.share)}%), with ${pctOf(b.expected)}% of teammates on the field being ${GL('W')}.</span>`).join('')}</div>` : '<p class="small muted">No one stands out yet. A player needs at least 4 logged throws to be compared.</p>';
     const hmLegend = mixed() ? `<p class="small muted hm-key"><i class="ww"></i> ${GL('W')} to ${GL('W')} <i class="mm"></i> ${GL('M')} to ${GL('M')} <i class="xx"></i> Cross-matchup</p>` : '';
     const rowTotal = (a) => [...(passes.get(a) || new Map()).values()].reduce((x, y) => x + y, 0);
-    const matrix = ids.length ? `<div class="tbl-wrap"><table class="hm"><thead><tr><th class="hm-name">Thrower ↓ / Receiver →</th>${ids.map((id) => `<th ${tipAttr(nameOf(id))}>${esc(short(id))}</th>`).join('')}<th>Total</th></tr></thead><tbody>${ids.map((a) => `<tr class="${flagged.has(a) ? 'flagged' : ''}"><th class="hm-name">${esc(nameOf(a))}</th>${ids.map((b) => cell(a, b)).join('')}<td class="hm-total">${rowTotal(a)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Log touches during a point and throws show up here.</p>';
+    const matrix = ids.length ? `<div class="tbl-wrap"><table class="hm"><thead><tr><th class="hm-name">Thrower ↓ / Receiver →</th>${ids.map((id) => `<th ${tipAttr(nameOf(id))}>${esc(short(id))}</th>`).join('')}<th>Total</th></tr></thead><tbody>${ids.map((a) => `<tr class="${flagged.has(a) ? 'flagged' : ''}"><th class="hm-name">${pLink(P(a))}</th>${ids.map((b) => cell(a, b)).join('')}<td class="hm-total">${rowTotal(a)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">Log touches during a point and throws show up here.</p>';
     return `<section class="panel">${head}
       <div class="chips">${toggle}${seg('combo-size', comboSize, [['2', 'Pairs'], ['3', 'Trios'], ['4', '4 or more']])}</div>
-      <p class="small muted">Groups that started more than one point together. Offense is scored on O points; Defense is breaks on D points.</p>
-      ${rows ? `<div class="tbl-wrap"><table class="bx"><thead><tr><th class="bx-name">Players</th><th>Points</th><th>Won–lost</th><th>+/–</th><th>Offense</th><th>Defense</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No group has played more than one point together yet.</p>'}
+      <p class="small muted">Groups that started more than one point together.</p>
+      ${rows ? `<div class="tbl-wrap"><table class="bx" data-sort-id="combos"><thead><tr><th class="bx-name">Players</th><th>Points (Off/Def)</th><th title="Time on the field together">Total Playtime (Avg per point)</th><th title="Goals for">GF</th><th title="Goals against">GA</th><th>+/–</th><th title="Completed passes between these players, both directions">Passes</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="muted">No group has played more than one point together yet.</p>'}
       <h3>Who threw to whom</h3><p class="small muted">Darker boxes mean more throws. Tap a box for names.</p>${hmLegend}${matrix}${biasNote}</section>`;
+  }
+
+  /* ---------- Insights: an AI looks for interesting stats ---------- */
+  const aiReady = () => !!(sampler || window.FIREBASE_CONFIG);
+  const insightBtn = (kind, key, label) => (aiReady() ? `<button type="button" class="btn small-btn" data-a="insight" data-k="${kind}" data-v="${esc(key)}">✨ ${label || 'Insights'}</button>` : '');
+  // Players go out as codes like P3, never by name, and come back as names on this device.
+  const codeOf = (id) => { const i = S.players.findIndex((p) => p.id === id); return i < 0 ? 'P0' : `P${i + 1}`; };
+  function compactPoint(pt) {
+    const items = Report.narrative(pt.events);
+    const ev = pt.events || [];
+    const play = items.map((it, k) => {
+      const thr = Report.isPass(items, k) && ev[it.idxs[0]].throwType ? `(${Report.THROW[ev[it.idxs[0]].throwType]})` : '';
+      return thr + (it.id ? `${codeOf(it.id)}${it.role || it.t !== 'touch' ? ':' + Report.label({ t: it.role || it.t, sub: it.sub }) : ''}` : Report.oppLabel(it));
+    }).join(' > ');
+    return { on: pt.on, result: pt.result === 'us' ? 'we scored' : 'they scored', seconds: Math.round((pt.endedAt - pt.startedAt) / 1000), line: pt.lineup.map(codeOf), subs: (pt.subs || []).map((s) => `${codeOf(s.in)} for ${codeOf(s.out)}`), play };
+  }
+  const totalsOut = (map) => Object.fromEntries([...map].filter(([id, v]) => P(id) && v.played).map(([id, v]) => [codeOf(id), { points: v.played, O: v.O, D: v.D, touches: v.touch, goals: v.goal, assists: v.assist, throwaways: (v.turn || 0) - (v.drop || 0), drops: v.drop || 0, blocks: v.block }]));
+  const gameOut = (label, points) => ({ game: label, final: `${points.filter((p) => p.result === 'us').length}-${points.filter((p) => p.result === 'them').length}`, box: totalsOut(Report.totals(points)), points: points.map(compactPoint) });
+  function insightData(kind, key) {
+    const roster = S.players.map((p) => ({ code: codeOf(p.id), jersey: p.no || '', matching: mixed() ? GL(p.match) : undefined }));
+    const all = S.history.filter((h) => h.points).map((h) => ({ label: `vs ${h.opponent || 'Opponent'}`, points: h.points })).concat(S.game ? [{ label: `vs ${S.game.opponent || 'Opponent'} (in progress)`, points: S.game.points }] : []);
+    if (kind === 'game') {
+      const src = gameSources().find((x) => x.key === key);
+      return { subject: `this one game (${src.label})`, data: { roster, ...gameOut(src.label, src.points) } };
+    }
+    if (kind === 'player') {
+      const p = P(key), games = all.filter((g) => g.points.some((pt) => pt.lineup.includes(p.id) || (pt.subs || []).some((s) => s.in === p.id))).slice(-10);
+      const pts = games.flatMap((g) => g.points), rec = Report.playerSummary(pts, p.id);
+      return { subject: `player ${codeOf(p.id)}`, data: { player: codeOf(p.id), roster, record: rec && { plus: rec.plus, minus: rec.minus, Opoints: rec.O, Oscored: rec.Owon, Dpoints: rec.D, breaks: rec.Dwon, throwsTo: rec.throwsTo.slice(0, 8).map(([id, n]) => [codeOf(id), n]), catchesFrom: rec.catchesFrom.slice(0, 8).map(([id, n]) => [codeOf(id), n]) }, games: games.map((g) => ({ game: g.label, box: totalsOut(Report.totals(g.points))[codeOf(p.id)] || null, pointsPlayed: g.points.filter((pt) => pt.lineup.includes(p.id) || (pt.subs || []).some((s) => s.in === p.id)).map(compactPoint) })) } };
+    }
+    const games = all.slice(-12);
+    const pairs = Report.combos(games.flatMap((g) => g.points), [2, 3]).slice(0, 15).map((c) => ({ players: c.ids.map(codeOf), points: c.pts, goals: c.scored, against: c.allowed }));
+    return { subject: 'the whole team this season', data: { team: S.team, roster, season: totalsOut(statTotals(true)), bestGroups: pairs, games: games.map((g) => gameOut(g.label, g.points)) } };
+  }
+  function insightPrompt(kind, key) {
+    const { subject, data } = insightData(kind, key);
+    return `You are the stats analyst for ${S.youth ? 'a youth' : 'an'} ultimate frisbee team. Look through the data below and find 5 to 8 genuinely interesting, specific stats or patterns about ${subject}: things a coach would not see at a glance, such as streaks, who connects with whom, how the team does on offense versus defense points, long versus short points, comebacks, throw types, or turnovers in context.
+
+Rules:
+- Write each insight as one short bullet starting with "- ", and include the numbers behind it.
+- Players appear only as codes like P3. Refer to players only by those codes, never invent names, and never guess anyone's gender or age.
+- Use only what the data shows. Don't speculate about causes you can't see.
+- Keep the tone positive and fair; ${S.youth ? 'parents and kids may read this' : 'players may read this'}. Frame weaknesses as things to work on.
+- No heading, no intro, no closing line.
+
+Glossary: O = point started on offense, D = started on defense. A "break" is scoring on a D point. In "play", ">" separates events in order; "(FH)"/"(BH)" before a catch is the throw type. "seconds" is point length.
+
+DATA:
+${JSON.stringify(data)}`;
+  }
+  async function askAI(prompt) {
+    if (sampler) { const r = await sampler(prompt, { modelTier: 'default' }); return r.text; }
+    const cfg = window.FIREBASE_CONFIG;
+    const call = async (model) => {
+      const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey };
+      try { const u = window.firebase && firebase.auth().currentUser; if (u) headers.Authorization = `Firebase ${await u.getIdToken()}`; } catch (e) { /* signed out is fine */ }
+      return fetch(`https://firebasevertexai.googleapis.com/v1beta/projects/${cfg.projectId}/models/${model}:generateContent`, { method: 'POST', headers, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.6 } }) });
+    };
+    let res = await call('gemini-3.8-flash');
+    if (res.status === 404) res = await call('gemini-3.5-flash-lite');
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = (body.error && body.error.message) || `error ${res.status}`;
+      throw new Error(/not been used|disabled|firebasevertexai|PERMISSION_DENIED/i.test(msg) ? 'AI Logic is not turned on for this Firebase project yet.' : msg);
+    }
+    return ((body.candidates || [])[0] || { content: { parts: [] } }).content.parts.map((x) => x.text || '').join('');
+  }
+  function insightHtml(text) {
+    const named = esc(text).replace(/\bP(\d+)\b/g, (m, n) => { const p = S.players[Number(n) - 1]; return p ? `<b>${esc(p.name)}</b>` : m; }).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    const lines = named.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+    const bullets = lines.filter((l) => /^[-*•]\s/.test(l));
+    return bullets.length ? `<ul class="insights">${bullets.map((l) => `<li>${l.replace(/^[-*•]\s+/, '')}</li>`).join('')}</ul>` : lines.map((l) => `<p>${l}</p>`).join('');
+  }
+  function insightSheet() {
+    const who = insight.kind === 'player' && P(insight.key) ? P(insight.key).name : insight.kind === 'game' ? 'This game' : S.team;
+    const body = insight.status === 'loading' ? '<p class="muted" role="status">Looking for interesting stats…</p>'
+      : insight.status === 'error' ? `<div class="warns" role="status"><b>Insights didn't load</b><span>${esc(insight.error)}</span></div>`
+        : insightHtml(insight.text);
+    return `<div class="scrim" data-a="insight-close" data-self="1"><div class="sheet" role="dialog" aria-label="Insights">
+      <div class="panel-head"><h2>Insights: ${esc(who)}</h2><span class="right">${insight.status === 'loading' ? '' : '<button type="button" class="btn small-btn" data-a="insight-again">Ask again</button>'}<button type="button" class="btn small-btn primary" data-a="insight-close">Done</button></span></div>
+      ${body}
+      <p class="small muted">Written by AI from your stats, so double-check anything surprising. Player names are swapped for codes before the stats leave this device.</p></div></div>`;
+  }
+  async function runInsight(kind, key, fresh) {
+    const id = `${S.id}:${kind}:${key}`;
+    insight = { kind, key, status: 'loading' };
+    render();
+    if (!fresh && insightCache.has(id)) { insight = { kind, key, status: 'done', text: insightCache.get(id) }; render(); return; }
+    try {
+      const text = await askAI(insightPrompt(kind, key));
+      insightCache.set(id, text);
+      if (insight && insight.key === key) { insight = { kind, key, status: 'done', text }; render(); }
+    } catch (e) {
+      if (insight && insight.key === key) { insight = { kind, key, status: 'error', error: e.code === 'not_granted' ? 'Claude access was turned off for this page.' : (e.message || String(e)) }; render(); }
+    }
+  }
+
+  /* ---------- Printable scoresheet ---------- */
+  async function printSheet() {
+    const src = pickSource(gameSources());
+    if (!src || !src.points.length) return;
+    const rows = sheetGroups(src.points).flatMap(([, list]) => list).map((p) => ({ id: p.id, name: p.name, no: p.no, match: p.match }));
+    const rec = gameRec(src.key), when = rec ? new Date(rec.startedAt || rec.date) : new Date();
+    const bytes = Report.scoresheetPdf({ title: `${S.team} vs ${src.opponent || 'Opponent'}`, subtitle: `${when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${src.key === 'current' ? 'Score' : 'Final'} ${src.us}-${src.them}`, points: src.points, rows, mixed: mixed() });
+    const filename = `${S.team}-vs-${src.opponent || 'opponent'}-scoresheet.pdf`.replace(/[^A-Za-z0-9.]+/g, '-');
+    const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+    try {
+      if (native) {
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        const fsys = window.Capacitor.registerPlugin('Filesystem'), share = window.Capacitor.registerPlugin('Share');
+        const saved = await fsys.writeFile({ path: filename, data: btoa(bin), directory: 'CACHE' });
+        await share.share({ title: 'Scoresheet', url: saved.uri, dialogTitle: 'Print or send the scoresheet' });
+        return;
+      }
+      if (downloads) { await downloads.save({ filename, data: bytes }); return; }
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const win = window.open(url, '_blank');
+      if (!win) { const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); }
+    } catch (e) { if (!e || (e.code !== 'declined' && !/cancel/i.test(e.message || ''))) flash("The PDF didn't open. Try again."); }
   }
 
   /* ---------- Every game on every team ---------- */
   function gamesScreen() {
-    const upcoming = [], live = [], done = [];
+    const watch = (rec) => (rec && Report.videoUrl(rec.video) ? `<a class="btn small-btn" href="${esc(Report.videoUrl(rec.video))}" target="_blank" rel="noopener">▶ Video</a>` : '');
+        const upcoming = [], live = [], done = [];
     const dated = (ms) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
     Root.teams.forEach((t) => {
-      if (t.game) live.push({ t, sort: t.game.startedAt, title: `vs ${t.game.opponent || 'Opponent'}`, when: dated(t.game.startedAt), score: `${t.game.points.filter((p) => p.result === 'us').length}–${t.game.points.filter((p) => p.result === 'them').length}`, btn: `<button type="button" class="btn small-btn primary" data-a="open-any" data-team="${t.id}" data-v="current">Open</button>` });
+      if (t.game) live.push({ t, sort: t.game.startedAt, title: `vs ${t.game.opponent || 'Opponent'}`, when: dated(t.game.startedAt), score: `${t.game.points.filter((p) => p.result === 'us').length}–${t.game.points.filter((p) => p.result === 'them').length}`, btn: `${watch(t.game)}<button type="button" class="btn small-btn primary" data-a="open-any" data-team="${t.id}" data-v="current">Open</button>` });
       (t.schedule || []).filter((x) => !x.gameId).forEach((x) => upcoming.push({ t, sort: new Date(`${x.date}T12:00:00`).getTime(), title: `vs ${x.opponent || 'Opponent'}`, when: `${longDate(x.date)}${x.time ? ' · ' + x.time : ''}${x.location ? ' · ' + x.location : ''}`, score: '', btn: t.game ? '' : `<button type="button" class="btn small-btn" data-a="any-start" data-team="${t.id}" data-id="${x.id}">Start</button>` }));
-      t.history.forEach((h) => done.push({ t, sort: h.date, title: `vs ${h.opponent || 'Opponent'}`, when: dated(h.date), score: `${h.us}–${h.them}`, btn: `<button type="button" class="btn small-btn" data-a="open-any" data-team="${t.id}" data-v="${h.id}">Box score</button>` }));
+      t.history.forEach((h) => done.push({ t, sort: h.date, title: `vs ${h.opponent || 'Opponent'}`, when: dated(h.date), score: `${h.us}–${h.them}`, btn: `${watch(h)}<button type="button" class="btn small-btn" data-a="open-any" data-team="${t.id}" data-v="${h.id}">Box score</button>` }));
     });
     upcoming.sort((a, b) => a.sort - b.sort); done.sort((a, b) => b.sort - a.sort);
     const row = (g) => `<div class="game-row"><div class="game-info"><strong>${esc(g.t.team)} ${esc(g.title)}${g.score ? ` · ${g.score}` : ''}</strong><span class="small muted">${esc(g.when)}</span></div><div class="chips">${g.btn}</div></div>`;
@@ -803,14 +998,14 @@
         const touches = (pt.events || []).filter((e) => e.id === p.id && e.t === 'touch').length;
         return `<div class="pp-row"><strong>Point ${i + 1}</strong><span>${pt.on === 'O' ? 'Offense' : 'Defense'}</span><span class="muted">${esc(posName((pt.roles || {})[p.id]))}</span><span>${pt.result === 'us' ? 'Won' : 'Lost'} ${us}–${them}</span><span class="muted">${clock(pt.endedAt - pt.startedAt)}</span><span class="muted">${touches} ${touches === 1 ? 'touch' : 'touches'}</span>${mine}</div>`;
       }).join('');
-      return `<details ${gi === 0 ? 'open' : ''}><summary>${esc(x.label)} · ${x.t.played} points</summary>${rows}</details>`;
+      return `<details ${gi < 3 ? 'open' : ''}><summary>${esc(x.label)} · ${x.t.played} points</summary>${rows}</details>`;
     }).join('');
     return `<section class="panel">
-      <div class="panel-head"><h2>${nameTag(p)}</h2><span class="right"><button type="button" class="btn small-btn" data-a="edit" data-id="${p.id}">Edit player</button><button type="button" class="btn small-btn primary" data-a="close-player">All players</button></span></div>
+      <div class="panel-head"><button type="button" class="btn small-btn back" data-a="player-back" aria-label="Back">←</button><h2>${nameTag(p)}</h2><span class="right">${insightBtn('player', p.id)}<button type="button" class="btn small-btn" data-a="edit" data-id="${p.id}">Edit player</button></span></div>
       <p class="small muted">${allSkills().map(([k, l]) => `${esc(l)} ${E.rate(p, k)}`).join(' · ')}${p.tags.length ? ' · ' + esc(p.tags.join(', ')) : ''} · ${TARGET_LABEL[p.target]} playtime · Minimum ${E.minPointsOf(p)}</p>
       <div class="figures">${figures.map(([l, v]) => `<div class="figure"><span class="label">${l}</span><b>${v}</b></div>`).join('')}</div>
       <h3>Games</h3>
-      ${games.length ? `<div class="tbl-wrap"><table class="bx bx-box"><thead><tr><th class="bx-name">Game</th><th>Final</th><th>Points</th><th>Touches</th><th>Goals</th><th>Assists</th><th>Turns</th><th>Blocks</th></tr></thead><tbody>${gameRows}</tbody></table></div>` : '<p class="muted">No games yet.</p>'}
+      ${games.length ? `<div class="tbl-wrap"><table class="bx bx-box" data-sort-id="player-games"><thead><tr><th class="bx-name">Game</th><th>Final</th><th>Points</th><th>Touches</th><th>Goals</th><th>Assists</th><th>Turns</th><th>Blocks</th></tr></thead><tbody>${gameRows}</tbody></table></div>` : '<p class="muted">No games yet.</p>'}
       <div class="partners"><div><h3>Throws most to</h3><div class="sug-chips">${partner(rec.throwsTo)}</div></div><div><h3>Catches most from</h3><div class="sug-chips">${partner(rec.catchesFrom)}</div></div></div>
       <h3>Points played</h3>${pointBlocks || '<p class="muted">No point details saved.</p>'}
     </section>`;
@@ -834,10 +1029,10 @@
       ${r.positions.length < E.MAX_POSITIONS ? `<form class="form-row" data-form="pos"><label class="field grow"><span class="label">New position</span><input id="new-pos" type="text" placeholder="Deep" autocomplete="off"></label><button class="btn primary" type="submit">Add position</button></form>` : `<p class="small muted">${E.MAX_POSITIONS} positions is the limit.</p>`}
     </section>`;
   }
-  function rulesScreen() {
+  function gameRulesBody() {
     const r = S.rules;
-    return `<div class="rules">
-      <section class="panel"><h2>Game</h2>
+    const mins = (k) => stepper('rule', rv(k, 0), 0, 240, `data-k="${k}" data-step="5"`, rv(k, 0) ? `${rv(k, 0)} min` : 'Off');
+    return `
         <div class="rl"><span>Players on the field</span>${stepper('rule', r.size, 4, 7, 'data-k="size"')}</div>
         <div class="rl"><span>Halftime at</span>${stepper('rule', r.halfAt, 1, 25, 'data-k="halfAt"')}</div>
         <div class="rl"><span>Game to</span>${stepper('rule', r.gameTo, 1, 25, 'data-k="gameTo"')}</div>
@@ -845,10 +1040,25 @@
         ${r.division === 'mixed' ? `<div class="rl"><span>Gender ratio</span>${seg('ratio-mode', r.ratioMode, [['abba', 'ABBA'], ['gendzone', 'Gendzone'], ['call', 'Offense Calls']])}</div>
         <div class="rl"><span>${r.ratioMode === 'abba' ? 'First point has more' : 'Usually more'}</span>${seg('ratio-start', r.ratioStart, [['W', GW('W', true)], ['M', GW('M', true)]])}</div>
         ${r.ratioMode === 'abba' ? '' : `<p class="small muted">Tap the ratio on the Current Game screen to set each point's call.${r.ratioMode === 'gendzone' ? ' Who starts in the gendzone is set when you start a game.' : ''}</p>`}` : ''}
+        <h3>Timeouts</h3>
+        <div class="rl"><span>Timeouts per half</span>${stepper('rule', rv('timeoutsPerHalf', 2), 0, 5, 'data-k="timeoutsPerHalf"')}</div>
+        <div class="rl"><span>Floaters (use in either half)</span>${stepper('rule', rv('floaters', 0), 0, 3, 'data-k="floaters"')}</div>
+        <h3>Caps</h3>
+        <p class="small muted">Minutes from the start of the game.</p>
+        <div class="rl"><span>Soft cap</span>${mins('softCap')}</div>
+        <div class="rl"><span>Hard cap</span>${mins('hardCap')}</div>
+        <div class="rl"><span>Time cap</span>${mins('timeCap')}</div>
+        <div class="rl"><span>Alarm sound (and 5-minute warning)</span>${seg('cap-alarms', rv('capAlarms', false) ? 'on' : 'off', [['off', 'Off'], ['on', 'On']])}</div>
+        <p class="small muted">Cap alerts wait until the point being played is over.</p>
         <h3>Playing time</h3>
         <div class="rl"><span>Points anyone can fall behind target</span>${stepper('rule', r.tolerance, 1, 6, 'data-k="tolerance"')}</div>
         <div class="rl"><span>Points in a row before a rest</span>${stepper('rule', r.maxStreak, 1, 6, 'data-k="maxStreak"')}</div>
-      </section>
+`;
+  }
+  function rulesScreen() {
+    const r = S.rules;
+    return `<div class="rules">
+      <section class="panel"><h2>Game</h2>${gameRulesBody()}</section>
       <section class="panel"><h2>Tag rules</h2>
         ${r.tagRules.map((t, i) => `<div class="tr"><div class="tr-top"><strong>${esc(t.tag)}</strong><button type="button" class="chip" data-a="tagrule-when" data-i="${i}">${t.when === 'all' ? 'Every point' : t.when === 'D' ? 'Defense points' : 'Offense points'} ⇄</button></div><div class="tr-steps"><span class="tr-step"><span class="small muted">At least</span>${stepper('tagrule', t.min || 0, 0, r.size, `data-i="${i}" data-k="min"`)}</span><span class="tr-step"><span class="small muted">At most</span>${stepper('tagrule', t.max === null ? r.size : t.max, 0, r.size, `data-i="${i}" data-k="max"`, t.max === null ? 'Any' : t.max)}</span></div></div>`).join('')}
         <form class="form-row" data-form="tag"><label class="field grow"><span class="label">New tag</span><input id="new-tag" type="text" placeholder="Zone thrower" autocomplete="off"></label><button class="btn" type="submit">Add tag</button></form>
@@ -862,13 +1072,114 @@
       </section></div>`;
   }
 
-  /* ---------- Render ---------- */
-  function menuView() {
-    if (!menu || !P(menu.id)) return '';
+  /* ---------- Any table with data-sort-id sorts when its headers are tapped ---------- */
+  function cellValue(td) {
+    if (!td) return '';
+    if (td.dataset.v !== undefined) return Number(td.dataset.v);
+    const s = td.textContent.trim().replace(/^[+]/, '').replace(/^[−–]/, '-');
+    let m = s.match(/^(\d+)h (\d+)m/); if (m) return Number(m[1]) * 3600 + Number(m[2]) * 60;
+    m = s.match(/^(-?\d+)m\b/); if (m) return Number(m[1]) * 60;
+    m = s.match(/^(-?\d+):(\d\d)/); if (m) return Number(m[1]) * 60 + Number(m[2]);
+    m = s.match(/^(-?\d+(?:\.\d+)?)/); if (m) return Number(m[1]);
+    return s === '–' || s === '' ? -Infinity : s.toLowerCase();
+  }
+  function applyTableSorts() {
+    document.querySelectorAll('table[data-sort-id]').forEach((tbl) => {
+      const id = tbl.dataset.sortId, st = tableSorts[id], heads = tbl.tHead ? tbl.tHead.rows[tbl.tHead.rows.length - 1].cells : [];
+      [...heads].forEach((th, i) => {
+        if (th.querySelector('.sorth') || !th.textContent.trim()) return;
+        const on = st && st.col === i;
+        if (on) th.setAttribute('aria-sort', st.dir < 0 ? 'descending' : 'ascending');
+        th.innerHTML = `<button type="button" class="sorth" data-a="tsort" data-t="${id}" data-col="${i}">${th.innerHTML}${on ? (st.dir < 0 ? ' ▾' : ' ▴') : ''}</button>`;
+      });
+      if (!st || !tbl.tBodies[0]) return;
+      const body = tbl.tBodies[0], rows = [...body.rows];
+      rows.sort((a, b) => { const x = cellValue(a.cells[st.col]), y = cellValue(b.cells[st.col]); const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)); return st.dir * c; });
+      rows.forEach((r) => body.appendChild(r));
+    });
+  }
+
+  /* ---------- Timeouts and caps ---------- */
+  const rv = (k, d) => (S.rules[k] === undefined ? d : S.rules[k]);
+  const halfOf = (g) => (g.points.reduce((h, p, i) => { const sc = E.score({ points: g.points.slice(0, i + 1) }); return Math.max(sc.us, sc.them) >= S.rules.halfAt ? 2 : h; }, 1));
+  function timeoutsLeft(g, who) {
+    const per = rv('timeoutsPerHalf', 2), fl = rv('floaters', 0), used = { 1: 0, 2: 0 };
+    let floated = 0;
+    (g.timeouts || []).filter((t) => t.who === who).forEach((t) => { used[t.half] += 1; if (used[t.half] > per) floated += 1; });
+    return Math.max(0, per - used[halfOf(g)]) + Math.max(0, fl - floated);
+  }
+  function timeoutRow(g) {
+    if (!rv('timeoutsPerHalf', 2) && !rv('floaters', 0)) return '';
+    const us = timeoutsLeft(g, 'us'), them = timeoutsLeft(g, 'them'), last = (g.timeouts || []).slice(-1)[0];
+    return `<div class="to-row"><button type="button" class="btn small-btn" data-a="timeout" data-v="us" ${us ? '' : 'disabled'}>Our timeout · ${us} left</button><button type="button" class="btn small-btn" data-a="timeout" data-v="them" ${them ? '' : 'disabled'}>Their timeout · ${them} left</button>${last ? `<button type="button" class="btn small-btn" data-a="undo-timeout">Undo ${last.who === 'us' ? 'our' : 'their'} timeout</button>` : ''}</div>`;
+  }
+  const CAPS = [['softCap', 'Soft cap'], ['hardCap', 'Hard cap'], ['timeCap', 'Time cap']];
+  function capClock(g) {
+    const el = Date.now() - g.startedAt, next = CAPS.map(([k, l]) => [l, rv(k, 0) * 60000]).filter(([, ms]) => ms > el).sort((a, b) => a[1] - b[1])[0];
+    return `Game ${clock(el)}${next ? ` · ${next[0]} in ${clock(next[1] - el)}` : ''}`;
+  }
+  function beep(pattern) {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      let t = audioCtx.currentTime + 0.05;
+      pattern.forEach(([f, d]) => { const o = audioCtx.createOscillator(), v = audioCtx.createGain(); o.type = 'square'; o.frequency.value = f; v.gain.value = 0.2; o.connect(v); v.connect(audioCtx.destination); o.start(t); o.stop(t + d); t += d + 0.12; });
+    } catch (e) { /* no sound on this device */ }
+    try { if (navigator.vibrate) navigator.vibrate(pattern.map(([, d]) => d * 1000)); } catch (e) { /* optional */ }
+  }
+  // Cap alerts wait until no point is being played.
+  function capCheck() {
+    const g = S && S.game;
+    if (!g || (g.live && !g.live.review)) return;
+    const el = Date.now() - g.startedAt, sc = E.score(g), hi = Math.max(sc.us, sc.them);
+    for (const [k, label] of CAPS) {
+      const ms = rv(k, 0) * 60000;
+      if (!ms) continue;
+      g.alerts = g.alerts || {};
+      if (el >= ms && !g.alerts[k]) {
+        g.alerts[k] = true; g.alerts[k + '5'] = true;
+        const to = k === 'softCap' ? Math.min(S.rules.gameTo, hi + 1) : k === 'hardCap' ? (sc.us === sc.them ? hi + 1 : hi) : hi;
+        g.capTo = Math.min(g.capTo || S.rules.gameTo, to);
+        capNotice = k === 'softCap' ? `Soft cap: the game is now to ${g.capTo}.` : k === 'hardCap' ? (sc.us === sc.them ? `Hard cap: tied, so play one more point. Game to ${g.capTo}.` : 'Hard cap: the game is over.') : 'Time cap: the game is over.';
+        if (rv('capAlarms', false)) beep([[880, 0.5], [880, 0.5], [880, 0.8]]);
+        commit(() => {});
+        return;
+      }
+      if (el >= ms - 5 * 60000 && el < ms && !g.alerts[k + '5']) {
+        g.alerts[k + '5'] = true;
+        capNotice = `5 minutes to the ${label.toLowerCase()}.`;
+        if (rv('capAlarms', false)) beep([[660, 0.25], [660, 0.25]]);
+        commit(() => {});
+        return;
+      }
+    }
+  }
+  // Pulls: the gender with more players this point, or in youth gendzone games, alternating.
+  function pullGender() {
+    if (!mixed()) return null;
     const g = G();
-    if (g && !g.live && editIdx === null) return `<div class="menu-scrim" data-a="menu-close" data-self="1"><div class="menu" id="stat-menu" style="left:${menu.x}px;top:${menu.y}px" role="menu" aria-label="${esc(P(menu.id).name)}"><div class="label">${esc(P(menu.id).name)}</div><button type="button" data-a="puller" role="menuitem">Puller (starts the point)</button></div></div>`;
+    if (S.youth && S.rules.ratioMode === 'gendzone') { const last = g.points.slice().reverse().find((p) => p.puller && P(p.puller)); return last ? (P(last.puller).match === 'W' ? 'M' : 'W') : null; }
+    return g.live ? g.live.ratio : ctx().ratio;
+  }
+  const canPull = (p) => { const w = pullGender(); return !w || (w === 'W') === (p.match === 'W'); };
+
+  /* ---------- Render ---------- */
+  const pullWarn = () => (menu && P(menu.id) && !canPull(P(menu.id)) ? `<div class="menu-warn" role="note">${S.youth && S.rules.ratioMode === 'gendzone' ? `Pulls alternate: a ${GL(pullGender())} player pulls this point` : `A ${GL(pullGender())} player should pull this point`}</div>` : '');
+  function menuView() {
+    if (!menu) return '';
+    const special = /^(goal|arr):(\d+)$/.exec(menu.id);
+    if (special) {
+      const i = Number(special[2]), ev = (activePt() || {}).events && activePt().events[i];
+      if (!ev) return '';
+      const items = special[1] === 'goal'
+        ? `<button type="button" data-a="callahan" data-i="${i}" role="menuitem">${ev.sub === 'callahan' ? 'Not a Callahan' : 'Callahan'}</button>`
+        : [['f', 'Forehand'], ['b', 'Backhand'], ['o', 'Other']].map(([v, l]) => `<button type="button" data-a="throw-type" data-i="${i}" data-v="${v}" role="menuitem" ${ev.throwType === v ? 'aria-pressed="true"' : ''}>${l}${ev.throwType === v ? ' ✓' : ''}</button>`).join('') + (ev.throwType ? `<button type="button" data-a="throw-type" data-i="${i}" data-v="" role="menuitem">Clear</button>` : '');
+      return `<div class="menu-scrim" data-a="menu-close" data-self="1"><div class="menu" id="stat-menu" style="left:${menu.x}px;top:${menu.y}px" role="menu"><div class="label">${special[1] === 'goal' ? `Goal: ${whoName(ev.id)}` : `Throw to ${whoName(ev.id)}`}</div>${items}</div></div>`;
+    }
+    if (!P(menu.id)) return '';
+    const g = G();
+    if (g && !g.live && editIdx === null) return `<div class="menu-scrim" data-a="menu-close" data-self="1"><div class="menu" id="stat-menu" style="left:${menu.x}px;top:${menu.y}px" role="menu" aria-label="${esc(P(menu.id).name)}"><div class="label">${esc(P(menu.id).name)}</div>${pullWarn()}<button type="button" data-a="puller" role="menuitem">Puller (starts the point)</button></div></div>`;
     return `<div class="menu-scrim" data-a="menu-close" data-self="1"><div class="menu" id="stat-menu" style="left:${menu.x}px;top:${menu.y}px" role="menu" aria-label="${esc(P(menu.id).name)}"><div class="label">${esc(P(menu.id).name)}</div>
-      ${editIdx === null && pullOpen() ? '<button type="button" data-a="puller" role="menuitem">Puller</button>' : ''}${STAT_MENU.map(([t, sub, l]) => `<button type="button" data-a="stat" data-v="${t}" data-sub="${sub}" role="menuitem">${l}</button>`).join('')}
+      ${editIdx === null && pullOpen() ? `${pullWarn()}<button type="button" data-a="puller" role="menuitem">Puller</button>` : ''}${STAT_MENU.map(([t, sub, l]) => `<button type="button" data-a="stat" data-v="${t}" data-sub="${sub}" role="menuitem">${l}</button>`).join('')}
       ${editIdx === null ? '<button type="button" data-a="menu-sub" role="menuitem">Sub out</button>' : ''}</div></div>`;
   }
   function settingsSheet() {
@@ -903,9 +1214,11 @@
     else view = rulesScreen();
     const tabs = [['game', 'Current Game'], ['games', 'Games'], ['roster', 'Teams'], ['players', 'Players'], ['time', 'Stats'], ['rules', 'Rules']];
     root.innerHTML = `<div class="wrap">
-      <header class="bar"><h1 class="brand">Line Caller</h1><button type="button" class="team-now" data-a="tab" data-v="roster">${esc(S.team)}</button><nav class="tabs">${tabs.map(([k, l]) => `<button type="button" class="tab" data-a="tab" data-v="${k}" ${tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}${CloudLink && !CloudLink.user ? '<button type="button" class="tab" data-a="cloud-in">Sign in</button>' : ''}<button type="button" class="tab" data-a="settings-open">Settings</button></nav></header>
+      <header class="bar"><h1 class="brand">Line Caller</h1><button type="button" class="team-now" data-a="tab" data-v="roster">${S.logo ? `<img class="team-logo" src="${S.logo}" alt="">` : ''}${esc(S.team)}</button><nav class="tabs">${tabs.map(([k, l]) => `<button type="button" class="tab" data-a="tab" data-v="${k}" ${tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}${CloudLink && !CloudLink.user ? '<button type="button" class="tab" data-a="cloud-in">Sign in</button>' : ''}<button type="button" class="tab" data-a="settings-open">Settings</button></nav></header>
       ${S.isExample ? `<div class="banner"><span>You're looking at an example team. The players and ratings are made up.</span>${twoTap('clear', 'clear-example', 'Clear it and add my team', 'Tap again to clear')}</div>` : ''}
-      ${view}</div>${editing ? editSheet() : ''}${sendFor ? sendSheet() : ''}${settingsOpen ? settingsSheet() : ''}${menuView()}`;
+      ${view}</div>${editing ? editSheet() : ''}${sendFor ? sendSheet() : ''}${settingsOpen ? settingsSheet() : ''}${insight ? insightSheet() : ''}${menuView()}`;
+    applyTableSorts();
+    document.documentElement.style.setProperty('--team', Report.safeColor(S.color));
     if (active) { const el = document.getElementById(active); if (el) { el.focus(); if (caret !== null && caret !== undefined && el.setSelectionRange) try { el.setSelectionRange(caret, caret); } catch (e) { /* not a text field */ } } }
     const m = document.getElementById('stat-menu');
     if (m) { const b = m.getBoundingClientRect(); m.style.left = Math.max(8, Math.min(window.innerWidth - b.width - 8, b.left)) + 'px'; m.style.top = Math.max(8, Math.min(window.innerHeight - b.height - 8, b.top)) + 'px'; }
@@ -922,7 +1235,13 @@
     } catch (e) { /* the screen may sleep; timing still works */ }
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
-  setInterval(() => { const el = document.getElementById('timer'); if (el && S.game && S.game.live) el.textContent = clock(liveElapsed()); }, 500);
+  setInterval(() => {
+    const el = document.getElementById('timer'); if (el && S.game && S.game.live) el.textContent = clock(liveElapsed());
+    const gc = document.getElementById('gclock'); if (gc && S.game) gc.textContent = capClock(S.game);
+    capCheck();
+  }, 500);
+  // Browsers only play sound after a tap, so wake the audio on the first one.
+  document.addEventListener('pointerdown', () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); }, { passive: true });
 
   /* ---------- Tooltips ---------- */
   const tipEl = document.createElement('div');
@@ -1202,8 +1521,34 @@
       if (sel && liveOnField().includes(sel)) return subLive(sel, d.id);
       uiChange(() => { sel = sel === d.id ? null : d.id; });
     },
+    callahan(d) { const pt = activePt(), i = Number(d.i), on = pt.events[i].sub !== 'callahan'; menu = null; (editIdx !== null ? commit : commitLight)(() => { pt.events = E.setCallahan(pt.events, i, on); }); },
+    'throw-type'(d) { const e = activePt().events[Number(d.i)]; menu = null; (editIdx !== null ? commit : commitLight)(() => { if (d.v) e.throwType = d.v; else delete e.throwType; }); },
+    tsort(d) { uiChange(() => { const st = tableSorts[d.t], col = Number(d.col); tableSorts[d.t] = st && st.col === col ? { col, dir: -st.dir } : { col, dir: col === 0 ? 1 : -1 }; }); },
+    'pt-sort'(d) { uiChange(() => { ptSort = ptSort && ptSort.key === d.v ? { key: d.v, dir: -ptSort.dir } : { key: d.v, dir: d.v === 'name' ? 1 : -1 }; }); },
+    timeout(d) {
+      const g = G(), l = g.live;
+      commit(() => { g.timeouts = g.timeouts || []; g.timeouts.push({ who: d.v, at: Date.now(), point: g.points.length + 1, half: halfOf(g) }); if (l && !l.pausedAt && !l.review) l.pausedAt = Date.now(); });
+      if (rv('capAlarms', false)) audioCtx = audioCtx || (window.AudioContext ? new AudioContext() : null);
+      if (l && !l.review) flash('Timeout. The point clock is paused; tap Resume when play restarts.');
+    },
+    'undo-timeout'() { commit(() => { G().timeouts.pop(); }); },
+    'game-edit'(d) { uiChange(() => { editingGame = d.id || null; }); },
+    'rsvp-make'() { commit(() => { S.rsvpKey = rsvpKey(); }); },
+    'rsvp-reset'() { commit(() => { S.rsvpKey = rsvpKey(); S.rsvpAnswers = {}; delete S.rsvpHash; }); },
+    'rsvp-copy'() { const u = rsvpUrl(); if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(u).then(() => flash('RSVP link copied.'), () => flash('Copying was blocked. Select the link and copy it.')); },
+    async 'rsvp-share'() { try { await window.Capacitor.registerPlugin('Share').share({ title: `${S.team} RSVP`, text: `Let us know who's coming to ${S.team} games:`, url: rsvpUrl() }); } catch (e) { /* closed */ } },
+    'logo-remove'() { commit(() => { delete S.logo; }); },
+    'cap-ok'() { uiChange(() => { capNotice = null; }); },
+    'cap-alarms'(d) { commit(() => { S.rules.capAlarms = d.v === 'on'; }); if (d.v === 'on') beep([[660, 0.2]]); },
+    'box-sort'(d) { uiChange(() => { boxSort = boxSort && boxSort.key === d.v ? { key: d.v, dir: -boxSort.dir } : { key: d.v, dir: d.v === 'name' || d.v === 'no' ? 1 : -1 }; }); },
+    'bench-filter'(d) { uiChange(() => { benchFilter = benchFilter === d.v ? 'all' : d.v; }); },
+    insight(d) { runInsight(d.k, d.v); },
+    'insight-again'() { runInsight(insight.kind, insight.key, true); },
+    'insight-close'() { uiChange(() => { insight = null; }); },
+    'print-sheet'() { printSheet(); },
     'menu-close'() { uiChange(() => { menu = null; }); },
     stat(d) { const id = menu.id; menu = null; if (d.v === 'goal' && editIdx === null && !G().live.review) { addStats([{ t: 'goal', id }]); A.result({ v: 'us' }); return; } (editIdx !== null ? commit : commitLight)(() => addStats([{ t: d.v, id, ...(d.sub ? { sub: d.sub } : {}) }])); },
+    'opp-pass'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'opppass' }])); },
     'opp-turn'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'oppturn' }])); },
     pause() { const l = G().live; commitLight(() => { if (l.pausedAt) resume(l); else l.pausedAt = Date.now(); }); },
     'edit-prev'() { stopVoice(); uiChange(() => { editIdx = G().points.length - 1; sel = null; voice = null; }); },
@@ -1250,7 +1595,7 @@
       commit(() => {
         const g = G(), sc = E.score(g), st = E.replay(g, S.players, S.rules), perPlayer = {};
         st.forEach((s, id) => { if (s.played) perPlayer[id] = { drop: s.drop, played: s.played, O: s.O, D: s.D, ms: s.ms, touch: s.touch, goal: s.goal, assist: s.assist, turn: s.turn, block: s.block }; });
-        S.history.push({ id: g.id, opponent: g.opponent, date: g.startedAt, us: sc.us, them: sc.them, perPlayer, points: g.points, startOn: g.startOn, mode: g.mode, out: g.out });
+        S.history.push({ id: g.id, video: g.video || '', opponent: g.opponent, date: g.startedAt, us: sc.us, them: sc.them, perPlayer, points: g.points, startOn: g.startOn, mode: g.mode, out: g.out });
         S.history.sort((x, y) => x.date - y.date);
         S.lastFinal = g.id;
         S.history.slice(0, -20).forEach((h) => { delete h.points; });
@@ -1281,12 +1626,14 @@
         S.history.splice(i, 1);
         const entry = S.schedule.find((x) => x.gameId === h.id);
         if (entry) { delete entry.gameId; delete entry.us; delete entry.them; }
-        S.game = { id: h.id, scheduleId: entry ? entry.id : null, opponent: h.opponent, startOn: h.startOn || (h.points[0] ? h.points[0].on : 'O'), mode: h.mode || 'balanced', out: h.out || {}, startedAt: h.date, points: h.points, live: null, draft: newDraft() };
+        S.game = { id: h.id, video: h.video || '', scheduleId: entry ? entry.id : null, opponent: h.opponent, startOn: h.startOn || (h.points[0] ? h.points[0].on : 'O'), mode: h.mode || 'balanced', out: h.out || {}, startedAt: h.date, points: h.points, live: null, draft: newDraft() };
         S.setup = null; tab = 'game'; sendFor = null; sel = null; voice = null; pointsSource = 'current';
         editIdx = h.points.length ? h.points.length - 1 : null;
       });
     },
-    'open-player'(d) { uiChange(() => { playerOpen = d.id; }); },
+    'go-player'(d) { stopVoice(); uiChange(() => { navBack = { tab, ptView, pointsSource, playerOpen, y: window.scrollY }; tab = 'players'; playerOpen = d.id; menu = null; editIdx = null; }); window.scrollTo(0, 0); },
+    'open-player'(d) { uiChange(() => { navBack = { tab: 'players', ptView, pointsSource, playerOpen: null, y: window.scrollY }; playerOpen = d.id; }); window.scrollTo(0, 0); },
+    'player-back'() { const b = navBack || { tab: 'players', ptView, pointsSource, playerOpen: null, y: 0 }; navBack = null; uiChange(() => { tab = b.tab; ptView = b.ptView; pointsSource = b.pointsSource; playerOpen = b.playerOpen; }); window.scrollTo(0, b.y || 0); },
     'close-player'() { uiChange(() => { playerOpen = null; }); },
     'open-game-stats'(d) { uiChange(() => { tab = 'time'; ptView = 'stats'; pointsSource = d.v; }); },
     'open-mic'() {
@@ -1296,14 +1643,14 @@
     },
     'team-view'(d) { uiChange(() => { teamView = d.v; coachNote = ''; }); },
     'open-any'(d) { stopVoice(); commit(() => { Root.active = d.team; S = activeTeam(); sel = null; editIdx = null; voice = null; if (d.v === 'current') tab = 'game'; else { tab = 'time'; ptView = 'stats'; pointsSource = d.v; } }); },
-    'any-start'(d) { commit(() => { Root.active = d.team; S = activeTeam(); const x = S.schedule.find((y) => y.id === d.id); S.setup = { opponent: x.opponent, startOn: 'O', out: {}, scheduleId: x.id }; tab = 'game'; }); },
+    'any-start'(d) { commit(() => { Root.active = d.team; S = activeTeam(); const x = S.schedule.find((y) => y.id === d.id); S.setup = { opponent: x.opponent, startOn: 'O', out: rsvpOut(x.id), scheduleId: x.id }; tab = 'game'; }); },
     'remove-coach'(d) { CloudLink.removeCoach(S.id, d.v); },
     'game-role'(d) { commit(() => { Root.gameRole = d.v; }); },
     'pt-view'(d) { uiChange(() => { ptView = d.v; }); },
     'combo-size'(d) { uiChange(() => { comboSize = d.v; }); },
     'del-schedule'(d) { commit(() => { S.schedule = S.schedule.filter((x) => x.id !== d.id); }); },
-    'pick-scheduled'(d) { commit(() => { const x = S.schedule.find((y) => y.id === d.id); S.setup.scheduleId = d.id; S.setup.opponent = x.opponent; }); },
-    'start-scheduled'(d) { commit(() => { const x = S.schedule.find((y) => y.id === d.id); S.setup = { opponent: x.opponent, startOn: 'O', out: {}, scheduleId: x.id }; tab = 'game'; }); },
+    'pick-scheduled'(d) { commit(() => { const x = S.schedule.find((y) => y.id === d.id); S.setup.scheduleId = d.id; S.setup.opponent = x.opponent; S.setup.out = rsvpOut(d.id); }); },
+    'start-scheduled'(d) { commit(() => { const x = S.schedule.find((y) => y.id === d.id); S.setup = { opponent: x.opponent, startOn: 'O', out: rsvpOut(x.id), scheduleId: x.id }; tab = 'game'; }); },
     'toggle-sub'(d) { commit(() => { const c = P(d.id).contacts.find((x) => x.id === d.v); c.subscribed = !c.subscribed; }); },
     'del-contact'(d) { commit(() => { const p = P(editing); p.contacts = p.contacts.filter((x) => x.id !== d.v); }); },
     'send-open'() { uiChange(() => { sendFor = true; reportNote = ''; }); },
@@ -1334,7 +1681,7 @@
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(list).then(() => done('Addresses copied. Paste them into BCC.'), () => done('Copying was blocked. Select the addresses in the box below.'));
       else done('Select the addresses in the box below.');
     },
-    rule(d) { commit(() => { S.rules[d.k] += Number(d.d); redraft(); }); },
+    rule(d) { commit(() => { S.rules[d.k] = Math.max(0, (S.rules[d.k] || 0) + Number(d.d) * (Number(d.step) || 1)); redraft(); }); },
     'pos-limit'(d) {
       commit(() => {
         S.rules.positions[d.i][d.on].min += Number(d.d);
@@ -1378,6 +1725,9 @@
     if (at === from) return;
     const [moving] = items.splice(from, 1);
     items.splice(at, 0, moving);
+    // The goal always ends the point.
+    const last = items.filter((it) => it.role === 'goal' || it.t === 'goal' || it.t === 'oppgoal');
+    if (last.length) { const rest = items.filter((it) => !last.includes(it)); items.length = 0; items.push(...rest, ...last); }
     const flat = items.flatMap((it) => it.idxs.map((i) => pt.events[i]));
     commit(() => { pt.events = E.reflow(flat); });
   }
@@ -1406,6 +1756,7 @@
   }
   function moveDrag(x, y) {
     const { ghost } = dragging;
+    if (dragging.sx !== undefined && Math.hypot(x - dragging.sx, y - dragging.sy) > 10) dragging.moved = true;
     ghost.style.left = x + 'px'; ghost.style.top = y + 'px';
     if (dragging.ev !== undefined) {
       let best = null, dist = Infinity;
@@ -1417,7 +1768,6 @@
       if (best) { best.el.classList.add(best.side === 'before' ? 'ins-before' : 'ins-after'); dragging.to = Number(best.el.dataset.evi); dragging.side = best.side; }
       return;
     }
-    if (dragging.sx !== undefined && Math.hypot(x - dragging.sx, y - dragging.sy) > 10) dragging.moved = true;
     const under = document.elementFromPoint(x, y);
     const zone = under && under.closest('[data-drop]');
     if (dragging.zone !== zone) {
@@ -1433,6 +1783,7 @@
     if (d.ev !== undefined) {
       document.querySelectorAll('.ins-before,.ins-after').forEach((el) => el.classList.remove('ins-before', 'ins-after'));
       suppress();
+      if (apply && d.press && !d.moved && Date.now() - d.at >= 450) { openMenu(d.press, d.sx, d.sy); return; }
       if (apply && d.to !== undefined && d.to !== d.ev) moveNarrative(d.ev, d.to, d.side);
       return;
     }
@@ -1497,9 +1848,27 @@
       if (m) commit(() => { const p = activePt(), ms = (Number(m[1]) * 60 + Number(m[2] || 0)) * 1000; p.endedAt = p.startedAt + Math.max(1000, ms); });
       else render();
     }
+    if (key === 'video') {
+      const rec = gameRec(ev.target.dataset.k), s = v.trim();
+      if (rec && (rec.video || '') === (s ? Report.videoUrl(s) : '')) { /* unchanged */ } else if (rec && (!s || Report.videoUrl(s))) commit(() => { rec.video = s ? Report.videoUrl(s) : ''; });
+      else if (rec) flash("That doesn't look like a YouTube link.");
+    }
     if (key === 'points-src') uiChange(() => { pointsSource = v; });
     if (key === 'team' && v.trim()) commit(() => { S.team = v.trim(); });
     if (key === 'youth') commit(() => { S.youth = ev.target.checked; });
+    if (key === 'team-color' && /^#[0-9a-f]{6}$/i.test(v)) commit(() => { S.color = v; });
+    if (key === 'team-logo' && ev.target.files && ev.target.files[0]) {
+      const img = new Image(), url = URL.createObjectURL(ev.target.files[0]);
+      img.onload = () => {
+        const size = 160, k = Math.min(size / img.width, size / img.height, 1), cv = document.createElement('canvas');
+        cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        commit(() => { S.logo = cv.toDataURL('image/png'); });
+      };
+      img.onerror = () => flash("That image couldn't be read.");
+      img.src = url;
+    }
     if (key === 'pos-name' && v.trim()) commit(() => { const p = S.rules.positions[i]; p.name = v.trim(); p.abbr = makeAbbr(p.name, p.id); });
     if (key === 'pos-skill') commit(() => { const p = S.rules.positions[i]; p.skill = v === 'own' ? 'x_' + p.id : v; });
   });
@@ -1526,6 +1895,10 @@
     if (form === 'coach') {
       const email = document.getElementById('coach-email').value.trim().toLowerCase();
       if (email.includes('@')) { coachNote = `${email} can now open this team by signing in with that Google account. Send them ${window.location.protocol === 'https:' && !window.location.hostname.includes('localhost') ? window.location.href.split('#')[0] : 'the app link'}.`; CloudLink.addCoach(S.id, email); render(); }
+    }
+    if (form === 'schedule-edit') {
+      const x = S.schedule.find((y) => y.id === ev.target.dataset.id), v = (id) => document.getElementById(id).value.trim();
+      if (x && v('se-opp') && v('se-date')) commit(() => { Object.assign(x, { opponent: v('se-opp'), date: v('se-date'), time: v('se-time'), location: v('se-loc') }); editingGame = null; });
     }
     if (form === 'schedule') {
       const opponent = document.getElementById('sch-opp').value.trim(), date = document.getElementById('sch-date').value;
@@ -1555,7 +1928,7 @@
     firebase.initializeApp(window.FIREBASE_CONFIG);
     const auth = firebase.auth(), fs = firebase.firestore();
     fs.enablePersistence({ synchronizeTabs: true }).catch(() => { /* another tab holds it; sync still works */ });
-    const known = new Set(), listeners = new Map();
+    const known = new Set(), listeners = new Map(), rsvpListeners = new Map();
     let user = null, stopTeams = null, ready = false, timer = null, status = '', problem = '', plug = null;
     const native = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
     const nativeAuth = () => { if (!plug) plug = window.Capacitor.registerPlugin('FirebaseAuthentication'); return plug; };
@@ -1594,6 +1967,7 @@
         listenTeam(t.id);
       });
       Root.teams.filter((t) => t.access && t.access.admin === email() && t.access.name !== t.team).forEach((t) => { t.access.name = t.team; teams().doc(t.id).update({ name: t.team }).catch(fail); });
+      syncRsvp();
       const { writes, deletes } = Cloud.outgoing(Root, known, Date.now());
       if (!writes.length && !deletes.length) { persist(); return; }
       persist();
@@ -1604,6 +1978,23 @@
         batch.commit().catch(fail);
       }
       deletes.filter((id) => id.startsWith('t_')).forEach((id) => { const tid = id.slice(2); stopTeam(tid); teams().doc(tid).delete().catch(fail); });
+    }
+    // The RSVP page reads a small public record: upcoming games and roster names, nothing else.
+    function syncRsvp() {
+      Root.teams.filter((t) => t.access && t.rsvpKey).forEach((t) => {
+        const json = JSON.stringify({ team: t.team, games: (t.schedule || []).filter((x) => !x.gameId).map((x) => ({ id: x.id, date: x.date, time: x.time || '', opponent: x.opponent || '', location: x.location || '' })), players: t.players.map((p) => ({ id: p.id, name: p.name, no: p.no || '' })) });
+        const h = `${t.rsvpKey}:${Cloud.hash(json)}`;
+        if (t.rsvpHash !== h) { t.rsvpHash = h; fs.collection('rsvp').doc(t.rsvpKey).set({ teamId: t.id, json, at: Date.now() }).catch(fail); }
+        const cur = rsvpListeners.get(t.id);
+        if (cur && cur.key === t.rsvpKey) return;
+        if (cur) cur.stop();
+        const stop = fs.collection('rsvp').doc(t.rsvpKey).collection('answers').onSnapshot((snap) => {
+          const ans = {};
+          snap.forEach((d) => { const v = d.data(); if (v && v.game && v.player) ans[d.id] = { game: v.game, player: v.player, status: v.status, note: v.note || '', at: v.at || 0 }; });
+          if (JSON.stringify(ans) !== JSON.stringify(t.rsvpAnswers || {})) { t.rsvpAnswers = ans; persist(); if (!dragging) render(); }
+        }, () => { /* rules not published yet */ });
+        rsvpListeners.set(t.id, { key: t.rsvpKey, stop });
+      });
     }
     // Moves teams saved by the earlier single-account version into shared teams, once per device.
     async function migrate() {
@@ -1640,6 +2031,7 @@
     auth.onAuthStateChanged((u) => {
       if (stopTeams) { stopTeams(); stopTeams = null; }
       [...listeners.keys()].forEach(stopTeam);
+      rsvpListeners.forEach((x) => x.stop()); rsvpListeners.clear();
       known.clear(); ready = false; user = u; status = '';
       if (u) listen();
       if (S) render();
