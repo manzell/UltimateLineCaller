@@ -131,6 +131,9 @@ const Report = (() => {
       if (e.t === 'touch') { if (last && last !== e.id) catches++; last = e.id; continue; }
       if (e.t === 'assist') continue;
       last = null;
+      // Turning it over (or a block) while already without the disc means the other side lost it first.
+      if ((e.t === 'turn' && side === 'them') || ((e.t === 'block' || e.t === 'oppturn') && side === 'us') || (e.t === 'opppass' && side === 'us')) { const to = side === 'us' ? 'them' : 'us'; flips.push({ e, from: side, to, mark: 'T', unlogged: true }); side = to; }
+      if (e.t === 'opppass') continue;
       if (e.t === 'turn') { flips.push({ e, from: side, to: 'them', mark: 'T' }); side = 'them'; }
       else if (e.t === 'block') { flips.push({ e, from: side, to: 'us', mark: e.sub === 'int' ? 'I' : 'B' }); side = 'us'; }
       else if (e.t === 'goal' && e.sub === 'callahan' && side === 'them') { flips.push({ e, from: side, to: 'us', mark: 'C' }); side = 'us'; }
@@ -192,20 +195,26 @@ const Report = (() => {
   }
 
   // Point-by-point line score, with a heavier box around whichever team started on offense.
-  function lineScore(points, us, them) {
+  function lineScore(points, us, them, opts) {
     let u = 0, t = 0;
-    const heads = points.map((_, i) => `<th>${i + 1}</th>`).join('');
-    const cells = points.map((p) => {
+    const durs = points.map((p) => Math.max(0, (p.endedAt || 0) - (p.startedAt || 0))), sorted = durs.slice().sort((a, b) => a - b), median = sorted[Math.floor(sorted.length / 2)] || 0;
+    // Longer points get wider columns.
+    const wide = points.map((_, i) => (median ? Math.round(Math.max(20, Math.min(72, 28 * (durs[i] / median)))) : 28));
+    const w = (i) => `style="width:${wide[i]}px;min-width:${wide[i]}px"`;
+    const heads = points.map((_, i) => `<th ${w(i)}>${i + 1}</th>`).join('');
+    const cells = points.map((p, i) => {
       p.result === 'us' ? u++ : t++;
-      return { p, u, t };
+      return { p, u, t, i };
     });
-    const row = (who, label, final) => `<tr><th class="ln-team">${esc(label)}</th>${cells.map(({ p, u: a, t: b }) => {
+    const row = (who, label, final) => `<tr><th class="ln-team">${esc(label)}</th>${cells.map(({ p, u: a, t: b, i }) => {
       const scored = p.result === who;
       const offense = (who === 'us') === (p.on === 'O');
-      return `<td class="${scored ? 'scored' : ''} ${offense ? 'off' : ''} ${scored && !offense ? 'break' : ''}">${scored ? (who === 'us' ? a : b) : ''}</td>`;
+      const text = scored ? (who === 'us' ? a : b) : '';
+      const mins = `Point ${i + 1}: ${Math.floor(durs[i] / 60000)}:${String(Math.round(durs[i] / 1000) % 60).padStart(2, '0')}`;
+      return `<td class="${scored ? 'scored' : ''} ${offense ? 'off' : ''} ${scored && !offense ? 'break' : ''}" ${w(i)} title="${mins}">${opts && opts.link ? `<button type="button" class="ln-open" data-a="flow-point" data-v="${i}" aria-label="${mins}">${text}</button>` : text}</td>`;
     }).join('')}<td class="ln-final">${final}</td></tr>`;
     return `<div class="tbl-wrap"><table class="ln"><thead><tr><th class="ln-team"></th>${heads}<th class="ln-final">Final</th></tr></thead><tbody>${row('us', us, u)}${row('them', them || 'Opponent', t)}</tbody></table></div>
-      <p class="ln-note">Each filled box is the team that scored that point, with the running score. A heavy outline marks the team on offense. A red outline is a break: the team on defense scored.</p>`;
+      <p class="ln-note">Each filled box is the team that scored that point, with the running score. A heavy outline marks the team on offense. A red outline is a break: the team on defense scored. Wider columns were longer points.${opts && opts.link ? ' Tap a box to see that point.' : ''}</p>`;
   }
 
   const COLS = [['touch', 'Touches'], ['goal', 'Goals'], ['comp', 'Completions'], ['rec', 'Receptions'], ['assist', 'Assists'], ['turn', 'Turnovers'], ['block', 'Blocks']];
@@ -256,6 +265,9 @@ const Report = (() => {
         if (e.t === 'oppturn' || (e.t === 'goal' && e.sub === 'callahan')) them.turns++;
       }
     }
+    // Every possession that didn't end in that team's goal was a turnover, logged or not.
+    us.turns = Math.max(us.turns, us.oPoss + us.dPoss - us.goals);
+    them.turns = Math.max(them.turns, them.oPoss + them.dPoss - them.goals);
     return { us, them };
   }
   function teamTable(points, usName, themName) {
@@ -269,12 +281,12 @@ const Report = (() => {
       ['Offense: Goals / Possessions', (x) => `${x.oGoals}/${x.oPoss}${pct(x.oGoals, x.oPoss)}`],
       ['Defense: Goals / Possessions', (x) => `${x.dGoals}/${x.dPoss}${pct(x.dGoals, x.dPoss)}`],
       ['Clean Holds', (x) => String(x.clean)],
-      ['Turnovers (Throwaways, Drops)', (x) => (x === us ? `${x.turns} (${x.throwaways}, ${x.drops})` : String(x.turns))],
+      ['Turnovers (Throwaways, Drops)', (x) => { if (x !== us) return String(x.turns); const other = x.turns - x.throwaways - x.drops; return `${x.turns} (${x.throwaways}, ${x.drops}${other > 0 ? `, ${other} not logged` : ''})`; }],
       ['Blocks', (x) => (x === us ? String(x.blocks) : '–')],
       ['Time of Possession', (x) => `${mins(x.ms)}${pct(x.ms, top)}`],
     ];
     return `<div class="tbl-wrap"><table class="ts"><thead><tr><th class="ts-us">${esc(usName)}</th><th></th><th class="ts-them">${esc(themName || 'Opponent')}</th></tr></thead><tbody>${rows.map(([label, f]) => `<tr><td class="ts-us">${f(us, them)}</td><th class="ts-label">${label}</th><td class="ts-them">${f(them, us)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="ln-note">Possessions count each time a team has the disc. Opponent completions come from the Opponent pass button; their blocks aren't tracked.</p>`;
+      <p class="ln-note">Possessions count each time a team has the disc; every possession that doesn't end in a goal is a turnover, including ones nobody logged. Opponent completions come from the Opponent pass button; their blocks aren't tracked.</p>`;
   }
 
   function pointList(points, players, positions, color) {
@@ -297,8 +309,9 @@ const Report = (() => {
 .ln { width: auto; border-collapse: separate; border-spacing: 2px; font-variant-numeric: tabular-nums; }
 .ln th { font-size: .75rem; font-weight: 700; color: var(--muted); padding: 2px; min-width: 26px; text-align: center; }
 .ln th.ln-team { text-align: left; color: var(--ink); font-size: .875rem; white-space: nowrap; padding-right: 8px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
-.ln td { width: 28px; min-width: 28px; height: 30px; text-align: center; border: 1px solid var(--line); border-radius: 3px; font-weight: 700; font-size: .875rem; }
+.ln td { width: 28px; min-width: 20px; height: 30px; padding: 0; text-align: center; border: 1px solid var(--line); border-radius: 3px; font-weight: 700; font-size: .875rem; }
 .ln td.scored { background: var(--accent); color: var(--on-accent); }
+.ln .ln-open { display: block; width: 100%; height: 100%; min-height: 26px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: center; cursor: pointer; }
 .ln td.off { border: 3px solid var(--ink); }
 .ln td.break { border: 3px solid var(--break); }
 .ln td.ln-final, .ln th.ln-final { border: 0; font-size: 1.25rem; padding-left: 8px; color: var(--ink); min-width: 40px; }
@@ -342,7 +355,7 @@ const Report = (() => {
 
   /* ---------- One-page printable scoresheet, as a PDF built by hand ---------- */
   // rows: [{ name, no, match }] in print order; points as stored. Landscape letter, black ink except the jersey icons.
-  function scoresheetPdf({ title, subtitle, points, rows, mixed }) {
+  function scoresheetPdf({ title, subtitle, points, rows, mixed, halfAt }) {
     const W = 792, H = 612, M = 22, ops = [];
     const plain = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\u2013\u2014]/g, '-').replace(/[^\x20-\x7e\xa0-\xff]/g, '?').replace(/([\\()])/g, '\\$1');
     const num = (x) => Math.round(x * 100) / 100;
@@ -403,6 +416,8 @@ const Report = (() => {
     line(M, top0, M, bottom, 0.4);
     [top0, top0 + hh, bodyTop, bodyBottom, bottom].forEach((t) => line(M, t, M + gridW, t, t === bodyTop || t === bodyBottom ? 0.9 : 0.4));
     rows.forEach((_, k) => { if (k) line(M, bodyTop + k * rowH, M + gridW, bodyTop + k * rowH, 0.25); });
+    // A heavy line between the first and second half.
+    if (halfAt) { let u2 = 0, t2 = 0; for (let i = 0; i < points.length - 1; i++) { points[i].result === 'us' ? u2++ : t2++; if (Math.max(u2, t2) >= halfAt) { const x = M + nameW + (i + 1) * colW; line(x, top0, x, bottom, 2.6); break; } } }
     text('Slash = played (thick: long point, thin: short point) · Shaded column = we scored · A assist · G goal · T turnover · D block', M, H - M - 8, 7.5, false);
     const content = ops.join('\n');
     const objs = [
@@ -421,6 +436,50 @@ const Report = (() => {
     for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xff;
     return bytes;
   }
+
+  /* ---------- Field diagram: portrait, the team drawn first attacks the top endzone ---------- */
+  // Positions are fractions of the field, 0 to 1. Endzones are the top and bottom 20 of 120 yards.
+  const FW = 40, FH = 120;
+  // A plausible layout when nobody tapped where things happened.
+  function formation(n, attacking, at) {
+    const hx = at ? at.x : 0.5, hy = at ? at.y : 0.66;
+    const spots = attacking
+      ? [[hx, hy], [hx - 0.2, hy + 0.04], [hx + 0.2, hy + 0.04], [0.5, hy - 0.14], [0.5, hy - 0.22], [0.5, hy - 0.3], [0.5, hy - 0.38]]
+      : [[0.5, 0.56], [0.36, 0.5], [0.64, 0.5], [0.2, 0.4], [0.8, 0.4], [0.5, 0.34], [0.5, 0.18]];
+    return spots.slice(0, n).map(([x, y]) => ({ x: Math.min(0.95, Math.max(0.05, x)), y: Math.min(0.97, Math.max(0.03, y)) }));
+  }
+  // The passes and stats of the possession in progress, from events that were placed on the field.
+  function possessionTrail(events) {
+    let start = 0;
+    (events || []).forEach((e, i) => { if (['turn', 'block', 'oppturn', 'goal', 'oppgoal'].includes(e.t)) start = e.t === 'block' ? i : i + 1; });
+    return (events || []).slice(start).filter((e) => e.x !== undefined && (e.t === 'touch' || e.t === 'block'));
+  }
+  function fieldSvg(o) {
+    const X = (v) => (v * FW).toFixed(2), Y = (v) => (v * FH).toFixed(2);
+    const team = (t, flip) => {
+      const f = (p) => (flip ? { ...p, x: 1 - p.x, y: 1 - p.y } : p);
+      const lines = (t.trail || []).map(f).map((p, i, arr) => (i ? `<line x1="${X(arr[i - 1].x)}" y1="${Y(arr[i - 1].y)}" x2="${X(p.x)}" y2="${Y(p.y)}" class="f-pass" stroke="${t.color}"/>` : '')).join('');
+      const marks = (t.marks || []).map(f).map((m) => `<g class="f-mark"><circle cx="${X(m.x)}" cy="${Y(m.y)}" r="1.6" fill="${m.kind === 'T' ? '#c62828' : '#7b3fb3'}"/><text x="${X(m.x)}" y="${(m.y * FH + 0.55).toFixed(2)}" class="f-mk">${m.kind}</text></g>`).join('');
+      const dots = (t.dots || []).map(f).map((d) => `<g class="f-dot${d.hold ? ' hold' : ''}">${d.hold ? `<circle cx="${X(d.x)}" cy="${Y(d.y)}" r="3.4" class="f-ring" stroke="${t.color}"/>` : ''}<circle cx="${X(d.x)}" cy="${Y(d.y)}" r="2.3" fill="${t.color}"/><text x="${X(d.x)}" y="${(d.y * FH + 0.8).toFixed(2)}" fill="${inkOn(t.color)}" class="f-no">${esc(d.label)}</text>${d.hold ? `<ellipse cx="${(d.x * FW + 2.6).toFixed(2)}" cy="${(d.y * FH - 2.4).toFixed(2)}" rx="1.3" ry="0.55" class="f-disc"/>` : ''}</g>`).join('');
+      return lines + marks + dots;
+    };
+    const pend = o.pending ? `<circle cx="${X(o.pending.x)}" cy="${Y(o.pending.y)}" r="2.2" class="f-pending"/>` : '';
+    return `<svg class="field-svg${o.interactive ? ' tappable' : ''}" viewBox="0 0 ${FW} ${FH}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(o.label || 'Field')}">
+      <rect x="0" y="0" width="${FW}" height="${FH}" class="f-grass"/><rect x="0" y="0" width="${FW}" height="20" class="f-zone"/><rect x="0" y="100" width="${FW}" height="20" class="f-zone"/>
+      <line x1="0" y1="20" x2="${FW}" y2="20" class="f-line"/><line x1="0" y1="100" x2="${FW}" y2="100" class="f-line"/>
+      <text x="${FW / 2}" y="4" class="f-ez">${esc(o.topLabel || 'Attacking')}</text><text x="${FW / 2}" y="118" class="f-ez">${esc(o.bottomLabel || 'Defending')}</text>
+      <circle cx="${FW / 2}" cy="40" r="0.6" class="f-brick"/><circle cx="${FW / 2}" cy="80" r="0.6" class="f-brick"/>
+      ${(o.teams || []).map((t, i) => team(t, i === 1)).join('')}${pend}</svg>`;
+  }
+  const FIELD_CSS = `.field-svg { display: block; width: 100%; max-width: 360px; height: auto; margin: 0 auto; border-radius: 10px; touch-action: manipulation; }
+.field-svg.tappable { cursor: crosshair; }
+.f-grass { fill: #3f8f55; } .f-zone { fill: #357d49; } .f-line, .f-brick { stroke: rgba(255,255,255,.8); stroke-width: .35; fill: rgba(255,255,255,.8); }
+.f-ez { fill: rgba(255,255,255,.55); font: 700 1.7px system-ui, sans-serif; text-anchor: middle; letter-spacing: .15px; text-transform: uppercase; }
+.f-pass { stroke-width: .55; stroke-dasharray: 1.1 .9; fill: none; opacity: .95; }
+.f-no { font: 700 2.4px system-ui, sans-serif; text-anchor: middle; } .f-mk { font: 700 2px system-ui, sans-serif; text-anchor: middle; fill: #fff; }
+.f-ring { fill: none; stroke-width: .6; } .f-disc { fill: #fff; stroke: #333; stroke-width: .15; }
+.f-dot circle:not(.f-ring) { stroke: rgba(255,255,255,.85); stroke-width: .3; }
+.f-pending { fill: rgba(255,255,255,.35); stroke: #fff; stroke-width: .4; stroke-dasharray: .8 .5; }`;
 
   const dateText = (ms) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -465,6 +524,6 @@ const Report = (() => {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(team.team)} stats</title><style>${CSS}body{margin:0}</style></head><body class="rp">${fragment(team)}</body></html>`;
   }
 
-  return { CSS, safeColor, inkOn, teamStats, teamTable, holder, oppLabel, scoresheetPdf, label, videoUrl, isPass, THROW, THROW_NAME, possession, possessionBar, narrative, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
+  return { CSS, FIELD_CSS, fieldSvg, formation, possessionTrail, safeColor, inkOn, teamStats, teamTable, holder, oppLabel, scoresheetPdf, label, videoUrl, isPass, THROW, THROW_NAME, possession, possessionBar, narrative, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
 })();
 if (typeof module !== 'undefined') module.exports = Report;

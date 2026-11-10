@@ -33,5 +33,8 @@ const favicon = `<link rel="icon" type="image/png" href="data:image/png;base64,$
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8">${favicon}<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0);padding-bottom:env(safe-area-inset-bottom,0)}body{margin:0;font-size:14px}img{max-width:100%}[hidden]{display:none!important}</style></head><body>${body(bridge)}</body></html>`;
 fs.writeFileSync(path.join(__dirname, 'www/index.html'), page);
 // The RSVP page families open from a link. It talks to the database directly, with no sign-in.
+// Gamecast: a live, public view of a game, using the database's own live updates.
+const castLib = nm('firebase/firebase-app-compat.js') + nm('firebase/firebase-firestore-compat.js') + `<script>${read('firebase-config.js')}</script><script>${read('report.js').replace("if (typeof module !== 'undefined') module.exports = Report;", '')}</script>`;
+fs.writeFileSync(path.join(__dirname, 'www/cast.html'), read('cast.html').replace('<!--LIBS-->', castLib).replace('/*FAVICON*/', favicon));
 fs.writeFileSync(path.join(__dirname, 'www/rsvp.html'), read('rsvp.html').replace('/*CONFIG*/', read('firebase-config.js')).replace('/*FAVICON*/', favicon));
 console.log('built', (page.length / 1024).toFixed(0) + ' KB');

@@ -1,0 +1,124 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">/*FAVICON*/<title>Gamecast</title>
+<style>
+:root { --bg: #eef1f7; --panel: #ffffff; --ink: #11183a; --muted: #4c5577; --line: #d3d9e8; --accent: #2632c9; --live: #c62828; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0d1126; --panel: #171c39; --ink: #eef1ff; --muted: #a8b0d2; --line: #343c66; --accent: #9aa3ff; --live: #ff8a8a; color-scheme: dark; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, Roboto, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 16px 16px 40px; }
+.board { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; }
+.side { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.side .nm { font-weight: 700; text-align: center; overflow-wrap: anywhere; display: flex; align-items: center; gap: 6px; }
+.side .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.side b { font-size: 3rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.mid { text-align: center; font-variant-numeric: tabular-nums; }
+.mid .clock { font-size: 1.6rem; font-weight: 700; }
+.mid .small { font-size: .85rem; color: var(--muted); }
+.live { color: var(--live); font-weight: 700; font-size: .8rem; letter-spacing: .06em; }
+.live::before { content: '●'; margin-right: 4px; animation: blink 1.6s infinite; }
+@keyframes blink { 50% { opacity: .3; } }
+.cols { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }
+@media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+.card h2 { font-size: 1rem; margin: 0 0 8px; }
+.plays { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.plays .s { font-weight: 700; } .plays .a { opacity: .55; font-size: .85em; }
+.g { color: #0b7a3e; } .as { color: #1565c0; } .t { color: #c62828; } .bk { color: #7b3fb3; } .op { color: #8a6400; }
+@media (prefers-color-scheme: dark) { .g { color: #6fe0a5; } .as { color: #8cc4ff; } .t { color: #ff9a9a; } .bk { color: #d3a6ff; } .op { color: #f0c95a; } }
+.recent div { padding: 6px 0; border-top: 1px solid var(--line); font-size: .95rem; }
+.recent div:first-child { border-top: 0; }
+.muted { color: var(--muted); } .note { font-size: .8rem; color: var(--muted); margin-top: 6px; text-align: center; }
+.card .field-svg { height: min(68vh, 640px); width: auto; max-width: 100%; }
+.onfield { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: .9rem; margin-top: 8px; }
+</style></head><body><main id="app"><p class="muted">Loading the Gamecast…</p></main>
+<!--LIBS-->
+<script>
+(function () {
+  const key = location.hash.slice(1).replace(/[^A-Za-z0-9]/g, '');
+  const app = document.getElementById('app');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const clock = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  let ours = null, theirs = null, theirKey = null, stopTheirs = null, seenAt = 0;
+  if (!key) { app.innerHTML = '<p>This Gamecast link is incomplete. Ask the coach for the link again.</p>'; return; }
+  const st = document.createElement('style'); st.textContent = Report.FIELD_CSS; document.head.appendChild(st);
+  firebase.initializeApp(window.FIREBASE_CONFIG);
+  const db = firebase.firestore();
+  const parse = (snap) => { if (!snap.exists) return null; try { return JSON.parse(snap.data().json); } catch (e) { return null; } };
+  db.collection('cast').doc(key).onSnapshot((snap) => {
+    ours = parse(snap); seenAt = Date.now();
+    if (!ours) { app.innerHTML = "<p>This Gamecast link isn't working. It may have been replaced; ask the coach for the current link.</p>"; return; }
+    // When the opponent's coach is also casting this fixture, show both teams.
+    if (ours.fixtureId) db.collection('fixtures').doc(ours.fixtureId).get().then((f) => {
+      const cast = (f.exists && f.data().cast) || {}, other = Object.values(cast).find((k) => k !== key) || null;
+      if (other === theirKey) return;
+      if (stopTheirs) stopTheirs();
+      theirKey = other; theirs = null;
+      if (other) stopTheirs = db.collection('cast').doc(other).onSnapshot((s2) => { theirs = parse(s2); draw(); }, () => {});
+    }).catch(() => {});
+    draw();
+  }, () => { app.innerHTML = "<p>The Gamecast couldn't load. Check your connection.</p>"; });
+
+  function nextCap(s, now) {
+    const el = now - s.gameStartedAt, caps = [['Soft cap', s.caps.soft], ['Hard cap', s.caps.hard], ['Time cap', s.caps.time]].filter(([, m]) => m).map(([l, m]) => [l, m * 60000 - el]).filter(([, left]) => left > 0).sort((a, b) => a[1] - b[1]);
+    return caps.length ? `${caps[0][0]} in ${clock(caps[0][1])}` : `Game time ${clock(el)}`;
+  }
+  function playsHtml(s) {
+    const pt = s.point, name = (id) => { const p = s.players[id]; return p ? `${p.no ? '#' + esc(p.no) + ' ' : ''}${esc(p.name)}` : 'Player'; };
+    if (!pt) return '<span class="muted">Between points.</span>';
+    const items = Report.narrative(pt.events);
+    const out = items.map((it, i) => {
+      const arrow = i ? (Report.isPass(items, i) ? '<span class="a">→</span>' : '<span class="a">·</span>') : '';
+      let txt;
+      if (!it.id) txt = `<span class="s op">${Report.oppLabel(it)}</span>`;
+      else if (it.t === 'touch' && !it.role) txt = `<span>${name(it.id)}</span>`;
+      else { const k = it.role || it.t, cls = k === 'goal' ? 'g' : k === 'assist' ? 'as' : k === 'turn' ? 't' : 'bk'; txt = `<span class="s ${cls}">${Report.label({ t: k, sub: it.sub })}: ${name(it.id)}</span>`; }
+      return arrow + txt;
+    });
+    const pull = pt.puller && s.players[pt.puller] ? `<span class="s">Pull: ${name(pt.puller)}</span>${out.length ? '<span class="a">·</span>' : ''}` : '';
+    return pull + out.join('') || '<span class="muted">The point is under way.</span>';
+  }
+  // Dots for one team: placed plays first, then a plausible layout for everyone else.
+  function teamDots(s, attacking) {
+    const pt = s.point;
+    if (!pt) return { dots: [], trail: [], marks: [] };
+    const ev = pt.events.filter((e) => e.x !== null && e.x !== undefined);
+    const trail = Report.possessionTrail(ev).filter((e) => e.t === 'touch');
+    const last = trail[trail.length - 1];
+    const has = Report.holder({ on: pt.on, events: pt.events }) === 'us';
+    const lastTouch = [...pt.events].reverse().find((e) => e.t === 'touch');
+    const spots = Report.formation(pt.onField.length, attacking && has, last || null);
+    const label = (p) => p.no || (p.name || '?').slice(0, 2);
+    const holderId = has && lastTouch ? lastTouch.id : null;
+    const order = pt.onField.slice().sort((a, b) => (a.id === holderId ? -1 : b.id === holderId ? 1 : 0));
+    const dots = order.map((p, i) => ({ ...spots[i], label: label(p), hold: p.id === holderId }));
+    const marks = ev.filter((e) => ['turn', 'block'].includes(e.t)).slice(-3).map((e) => ({ x: e.x, y: e.y, kind: e.t === 'turn' ? 'T' : 'B' }));
+    return { dots, trail: has ? trail : [], marks };
+  }
+  function draw() {
+    if (!ours) return;
+    const s = ours, now = Date.now();
+    if (!s.live) {
+      app.innerHTML = `<div class="board" style="grid-template-columns:1fr"><div class="side"><span class="nm"><i class="sw" style="background:${esc(s.color)}"></i>${esc(s.team)}</span></div></div>
+        <div class="card" style="margin-top:16px"><h2>No game in progress</h2>${s.final ? `<p>Last game: ${esc(s.team)} ${s.final.us}, ${esc(s.final.opponent)} ${s.final.them}</p>` : ''}<p class="muted">This page updates by itself when the next game starts.</p></div>`;
+      return;
+    }
+    const pt = s.point, ptClock = pt ? clock((pt.pausedAt || now) - pt.startedAt) : '–';
+    const usHas = pt && Report.holder({ on: pt.on, events: pt.events }) === 'us';
+    const them = theirs && theirs.live ? theirs : null;
+    const oppColor = them ? them.color : '#8a90a0';
+    const ourTeam = { color: s.color, ...teamDots(s, true) };
+    const theirTeam = them ? { color: oppColor, ...teamDots(them, true) } : null;
+    if (theirTeam && usHas) theirTeam.dots.forEach((d) => { d.hold = false; });
+    const field = Report.fieldSvg({ teams: theirTeam ? [ourTeam, theirTeam] : [ourTeam], topLabel: `▲ ${s.team} attack`, bottomLabel: `▼ ${s.opponent} attack`, label: 'Field with the players on' });
+    const status = !pt ? 'Between points' : pt.review ? (pt.review === 'us' ? `${s.team} scored` : `${s.opponent} scored`) : pt.pausedAt ? 'Clock stopped' : `${pt.on === 'O' ? s.opponent : s.team} pulled`;
+    app.innerHTML = `<div class="board">
+        <div class="side"><span class="nm"><i class="sw" style="background:${esc(s.color)}"></i>${esc(s.team)}</span><b>${s.us}</b></div>
+        <div class="mid"><div class="live">LIVE</div><div class="clock">${ptClock}</div><div class="small">${pt ? `Point ${pt.n}` : 'Between points'} · to ${s.gameTo}</div><div class="small">${esc(nextCap(s, now))}</div></div>
+        <div class="side"><span class="nm"><i class="sw" style="background:${esc(oppColor)}"></i>${esc(s.opponent)}</span><b>${s.them}</b></div></div>
+      <div class="cols"><div class="card">${field}<p class="note">${esc(status)}${usHas ? ` · ${esc(s.team)} has the disc` : pt ? ` · ${esc(s.opponent)} has the disc` : ''}. Spots are approximate unless the coach tapped where plays happened.</p>
+        ${pt ? `<div class="onfield">${pt.onField.map((p) => `<span>${p.no ? '#' + esc(p.no) + ' ' : ''}${esc(p.name)}</span>`).join('')}</div>` : ''}</div>
+        <div><div class="card"><h2>This point</h2><div class="plays">${playsHtml(s)}</div></div>
+        <div class="card recent" style="margin-top:16px"><h2>Recent points</h2>${s.recent.length ? s.recent.slice().reverse().map((r) => `<div><b>${r.n}.</b> ${r.result === 'us' ? `${esc(s.team)}${r.scorer ? `: ${r.scorer.no ? '#' + esc(r.scorer.no) + ' ' : ''}${esc(r.scorer.name)}` : ''}${r.assist ? ` <span class="muted">(from ${esc(r.assist.name)})</span>` : ''}` : esc(s.opponent)} <span class="muted">· ${clock(r.ms)}</span></div>`).join('') : '<p class="muted">No points yet.</p>'}</div></div></div>`;
+  }
+  setInterval(draw, 1000);
+})();
+</script></body></html>

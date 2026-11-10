@@ -137,6 +137,20 @@ check(box.includes('3 (1/2)'), 'points shown as total (O/D)');
   check(page.includes('Block: A</b> · A → <b class="e-goal">Goal: B'), 'no arrow after a block: ' + (page.match(/rp-chain">[^\n]*/) || [''])[0].slice(0, 160));
 }
 
+// Possessions and turnovers line up, even with gaps in the log.
+{
+  const base = { lineup: ['a'], subs: [], roles: {}, startedAt: 0, endedAt: 60000 };
+  const pts = [
+    { ...base, on: 'O', result: 'them', events: [touch('a'), { t: 'turn', id: 'a' }, { t: 'turn', id: 'a' }] },
+    { ...base, on: 'D', result: 'us', events: [{ t: 'block', id: 'a' }, { t: 'block', id: 'a' }, touch('a'), { t: 'goal', id: 'a' }] },
+  ];
+  const s = Report.teamStats(pts);
+  check(s.them.oPoss + s.them.dPoss - s.them.goals === s.them.turns && s.us.oPoss + s.us.dPoss - s.us.goals === s.us.turns, 'turnovers match possessions');
+  check(s.us.turns === 3 && s.them.turns === 3, 'turnovers: ' + s.us.turns + '/' + s.them.turns);
+  const ls = Report.lineScore([{ ...base, endedAt: 30000, on: 'O', result: 'us' }, { ...base, endedAt: 120000, on: 'D', result: 'them' }, { ...base, on: 'O', result: 'us' }], 'Us', 'Them', { link: true });
+  check(/width:56px/.test(ls) && /width:20px/.test(ls) && ls.includes('data-a="flow-point" data-v="1"'), 'point flow widths and links');
+}
+
 // A player's own record.
 {
   const s = Report.playerSummary(points, 'a');
