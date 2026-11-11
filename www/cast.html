@@ -652,6 +652,79 @@ const Report = (() => {
 .f-dot circle:not(.f-ring) { stroke: rgba(255,255,255,.85); stroke-width: .3; }
 .f-pending { fill: rgba(255,255,255,.35); stroke: #fff; stroke-width: .4; stroke-dasharray: .8 .5; }`;
 
+  /* ---------- Reading a schedule written in plain words ---------- */
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  function parseSchedule(text, today) {
+    const now = today || new Date(), out = [];
+    const pad = (n) => String(n).padStart(2, '0');
+    const yearFor = (m, d, y) => { if (y) return y < 100 ? 2000 + y : y; const t = new Date(now.getFullYear(), m - 1, d); return t < new Date(now.getFullYear(), now.getMonth(), now.getDate() - 45) ? now.getFullYear() + 1 : now.getFullYear(); };
+    for (const raw of String(text || '').split(/\n+/)) {
+      const line = raw.replace(/\s+/g, ' ').trim();
+      if (!line) continue;
+      let m, y, mo, d, rest = line;
+      if ((m = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(line))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+      else if ((m = /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/.exec(line))) { mo = +m[1]; d = +m[2]; y = m[3] ? +m[3] : 0; }
+      else if ((m = new RegExp(`\\b(${MONTHS.join('|')})[a-z]*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?`, 'i').exec(line))) { mo = MONTHS.indexOf(m[1].toLowerCase().slice(0, 3)) + 1; d = +m[2]; y = m[3] ? +m[3] : 0; }
+      else if ((m = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTHS.join('|')})[a-z]*\\.?(?:,?\\s*(\\d{4}))?`, 'i').exec(line))) { d = +m[1]; mo = MONTHS.indexOf(m[2].toLowerCase().slice(0, 3)) + 1; y = m[3] ? +m[3] : 0; }
+      else continue;
+      if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31)) continue;
+      rest = rest.replace(m[0], ' ');
+      const date = `${yearFor(mo, d, y)}-${pad(mo)}-${pad(d)}`;
+      let time = '';
+      const tm = /\b(\d{1,2})(?::(\d{2}))?\s*(?:-\s*\d{1,2}(?::\d{2})?\s*)?(a\.?m\.?|p\.?m\.?)/i.exec(rest) || /\b(\d{1,2}):(\d{2})\b/.exec(rest) || (/\bnoon\b/i.test(rest) ? [' noon ', '12', '00', 'pm'] : null);
+      if (tm) {
+        let h = +tm[1] % 24; const mins = tm[2] || '00', ap = (tm[3] || '').toLowerCase();
+        if (ap.startsWith('p') && h < 12) h += 12; if (ap.startsWith('a') && h === 12) h = 0;
+        if (!ap && h >= 1 && h <= 7) h += 12;
+        time = `${((h + 11) % 12) + 1}:${mins} ${h < 12 ? 'AM' : 'PM'}`;
+        rest = rest.replace(tm[0], ' ');
+      }
+      rest = rest.replace(/\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?/ig, ' ').replace(/\s+/g, ' ').trim();
+      const practice = /\b(practice|training|clinic)\b/i.test(rest);
+      const opp = /(?:^|\s|[-–—:,])(?:vs\.?|v\.?|versus|against|@)\s+(.+?)(?=\s+(?:at|in|on|@)\s|\s*[,;(—–|]|\s+-\s|$)/i.exec(rest);
+      const loc = /(?:\bat|\bin|[@—–|(])\s*([A-Z0-9][^,;()|—–]*?)(?=\s*[,;)|—–]|$)/.exec(opp ? rest.replace(opp[0], ' ') : rest);
+      const clean = (s) => (s || '').replace(/^[\s\-–—:,]+|[\s\-–—:,.]+$/g, '').trim();
+      let opponent = practice ? '' : clean(opp ? opp[1] : rest.replace(/\b(game|match)\b/ig, '').replace(loc ? loc[0] : '', ''));
+      const location = clean(loc && !/^\d/.test(loc[1]) ? loc[1] : '');
+      if (!practice && !opponent) opponent = 'Opponent';
+      out.push({ kind: practice ? 'practice' : 'game', date, time, opponent, location, raw: line });
+    }
+    return out;
+  }
+
+  /* ---------- Standings ---------- */
+  // games: [{ a, b, sa, sb }] with team ids. Ranked by win %, then the tiebreakers.
+  function standings(teamIds, games) {
+    const row = (id) => ({ id, w: 0, l: 0, t: 0, gf: 0, ga: 0 });
+    const tab = new Map(teamIds.map((id) => [id, row(id)]));
+    games.forEach((g) => {
+      const A = tab.get(g.a), B = tab.get(g.b);
+      if (!A || !B) return;
+      A.gf += g.sa; A.ga += g.sb; B.gf += g.sb; B.ga += g.sa;
+      if (g.sa > g.sb) { A.w++; B.l++; } else if (g.sb > g.sa) { B.w++; A.l++; } else { A.t++; B.t++; }
+    });
+    const rows = [...tab.values()].map((x) => ({ ...x, gp: x.w + x.l + x.t, pct: x.w + x.l + x.t ? (x.w + 0.5 * x.t) / (x.w + x.l + x.t) : 0, diff: x.gf - x.ga }));
+    // Head-to-head points (win 1, tie half) of one team against a set of others.
+    const h2h = (id, others) => games.reduce((n, g) => {
+      if (g.a === id && others.includes(g.b)) return n + (g.sa > g.sb ? 1 : g.sa === g.sb ? 0.5 : 0);
+      if (g.b === id && others.includes(g.a)) return n + (g.sb > g.sa ? 1 : g.sa === g.sb ? 0.5 : 0);
+      return n;
+    }, 0);
+    const beatAll = (id, others) => others.every((o) => { const mine = h2h(id, [o]), theirs = h2h(o, [id]); return mine > theirs; });
+    const byStats = (x, y) => y.diff - x.diff || y.w - x.w || y.gf - x.gf || x.id.localeCompare(y.id);
+    function breakTie(group) {
+      if (group.length < 2) return group;
+      const ids = group.map((x) => x.id);
+      if (group.length === 2) { const [x, y] = group, hx = h2h(x.id, [y.id]), hy = h2h(y.id, [x.id]); if (hx !== hy) return hx > hy ? [x, y] : [y, x]; return group.slice().sort(byStats); }
+      const top = group.find((x) => beatAll(x.id, ids.filter((i) => i !== x.id)));
+      if (top) return [top, ...breakTie(group.filter((x) => x !== top))];
+      return group.slice().sort(byStats);
+    }
+    const out = [];
+    rows.sort((x, y) => y.pct - x.pct).forEach((x) => { const last = out[out.length - 1]; if (last && Math.abs(last[0].pct - x.pct) < 1e-9) last.push(x); else out.push([x]); });
+    return out.flatMap(breakTie);
+  }
+
   const dateText = (ms) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
   // Only real YouTube links are ever shown as links.
@@ -695,7 +768,7 @@ const Report = (() => {
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(team.team)} stats</title><style>${CSS}body{margin:0}</style></head><body class="rp">${fragment(team)}</body></html>`;
   }
 
-  return { CSS, FIELD_CSS, fieldSvg, formation, possessionTrail, safeColor, inkOn, teamStats, teamTable, holder, oppLabel, scoresheetPdf, label, videoUrl, isPass, THROW, THROW_NAME, possession, possessionBar, narrative, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
+  return { CSS, standings, parseSchedule, FIELD_CSS, fieldSvg, formation, possessionTrail, safeColor, inkOn, teamStats, teamTable, holder, oppLabel, scoresheetPdf, label, videoUrl, isPass, THROW, THROW_NAME, possession, possessionBar, narrative, totals, passes, playerSummary, targetBias, statTable, combos, lineScore, boxTable, fragment, html, safeData };
 })();
 
 </script>

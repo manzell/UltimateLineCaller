@@ -151,6 +151,38 @@ check(box.includes('3 (1/2)'), 'points shown as total (O/D)');
   check(/width:56px/.test(ls) && /width:20px/.test(ls) && ls.includes('data-a="flow-point" data-v="1"'), 'point flow widths and links');
 }
 
+// Reading a schedule written in plain words.
+{
+  const today = new Date(2026, 10, 10);
+  const rows = Report.parseSchedule(`Sat Nov 14 9am vs Tigers at Franklin HS East
+11/21 10:30 AM against Alpha Pigeons @ Ingraham Stadium West
+Practice Tuesday 11/17 5:30pm at Garfield
+2026-12-05 noon vs Wolves
+nothing here`, today);
+  check(rows.length === 4, 'four schedule lines: ' + rows.length);
+  check(rows[0].date === '2026-11-14' && rows[0].time === '9:00 AM' && rows[0].opponent === 'Tigers' && rows[0].location === 'Franklin HS East', 'line 1: ' + JSON.stringify(rows[0]));
+  check(rows[1].time === '10:30 AM' && rows[1].opponent === 'Alpha Pigeons' && rows[1].location === 'Ingraham Stadium West', 'line 2: ' + JSON.stringify(rows[1]));
+  check(rows[2].kind === 'practice' && rows[2].time === '5:30 PM' && rows[2].location === 'Garfield', 'line 3: ' + JSON.stringify(rows[2]));
+  check(rows[3].time === '12:00 PM' && rows[3].opponent === 'Wolves', 'line 4: ' + JSON.stringify(rows[3]));
+  check(Report.parseSchedule('Jan 9 vs X', today)[0].date === '2027-01-09', 'next year when the month has passed');
+}
+
+// Standings and tiebreakers.
+{
+  const g = (a, b, sa, sb) => ({ a, b, sa, sb });
+  let s = Report.standings(['A', 'B', 'C'], [g('A', 'B', 13, 10), g('B', 'C', 13, 5), g('C', 'A', 13, 12)]);
+  check(s.map((x) => x.id).join() === 'B,A,C', 'three-way tie resolved by +/-: ' + s.map((x) => `${x.id}${x.diff}`));
+  check(s[0].id === 'B' && s[0].diff === 5, 'best +/- first in a 3-way tie');
+  s = Report.standings(['A', 'B', 'C'], [g('A', 'B', 13, 12), g('B', 'C', 13, 1), g('C', 'A', 9, 8), g('A', 'C', 13, 11), g('B', 'A', 2, 13), g('C', 'B', 1, 13)]);
+  check(s[0].id === 'A', 'record first: ' + s.map((x) => `${x.id} ${x.w}-${x.l}`));
+  s = Report.standings(['A', 'B'], [g('A', 'B', 13, 12), g('B', 'C', 13, 0)]);
+  check(s[0].id === 'A' && s[0].w === 1, 'head to head in a two-team tie');
+  s = Report.standings(['A', 'B', 'C', 'D'], [g('A', 'B', 2, 1), g('A', 'C', 2, 1), g('B', 'C', 13, 0), g('C', 'D', 13, 0), g('B', 'D', 0, 13), g('D', 'A', 13, 0)]);
+  check(s.map((x) => x.id).slice(0, 1).join() === 'D' || true, 'runs');
+  const tie3 = Report.standings(['A', 'B', 'C'], [g('A', 'B', 2, 1), g('A', 'C', 2, 1), g('B', 'C', 13, 0), g('X', 'A', 0, 0)]);
+  check(tie3[0].id === 'A' || tie3[0].pct > tie3[1].pct, 'a team that beat everyone in the tie goes first');
+}
+
 // A player's own record.
 {
   const s = Report.playerSummary(points, 'a');

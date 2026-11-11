@@ -12,12 +12,12 @@
   const STAT_LABEL = { goal: 'Goal', assist: 'Assist', turn: 'Turnover', block: 'Block' };
   const STAT_MENU = [['goal', '', 'Goal'], ['assist', '', 'Assist'], ['turn', 'throw', 'Throwaway'], ['turn', 'drop', 'Drop'], ['block', '', 'Block (D)'], ['block', 'int', 'Interception']];
   const MODE_LABEL = { develop: 'Develop', balanced: 'Balanced', competitive: 'Competitive', win: 'Universe' };
-  const SCHEMES = [['system', 'Automatic', 'Follows your device'], ['light', 'Light', 'Bright and plain'], ['dark', 'Dark', 'Easy at dusk'], ['field', 'Field', 'Deep turf green'], ['ocean', 'Ocean', 'Cool blues'], ['sunrise', 'Sunrise', 'Warm and soft'], ['sun', 'High sun', 'Maximum contrast outdoors'], ['team', 'Current team', 'Colors from your team']];
+  const SCHEMES = [['system', 'Automatic', 'Follows your device'], ['light', 'Light', 'Bright and plain'], ['dark', 'Dark', 'Easy at dusk'], ['field', 'Field', 'Deep turf green'], ['ocean', 'Ocean', 'Cool blues'], ['sunrise', 'Sunrise', 'Warm and soft'], ['sun', 'High sun', 'Maximum contrast outdoors'], ['press', 'Newsprint', 'Old black-and-white paper'], ['team', 'Current team', 'Colors from your team']];
   const newDraft = (plan) => ({ alt: 0, on: null, ratio: null, line: {}, plan: plan || null });
   const newPlayer = (name, f) => ({ id: uid(), name, no: '', aliases: '', match: 'M', h: 3, c: 3, d: 3, s: 3, tags: [], target: 'average', minPts: 2, contacts: [], ...f });
 
   let Root = null, S = null, tab = 'game', sel = null, editing = null, seasonView = false, ptView = 'time', pointsSource = 'current', backupText = '', notice = '';
-  let compView = null, compSub = 'overview', fieldEdit = null, schedDate = null, muSel = null, schedOpen = false, pendingSpot = null, schedKind = 'game', dirCache = [], navBack = null, editingComp = null, reporting = null, attendingPrac = null, halftimeOpen = false, pointSheet = null, boxSort = null, ptSort = null, editingGame = null, capNotice = null, audioCtx = null;
+  let rankBy = 'plus', boxOpen = false, bkEdit = null, teamComp = 'all', bkRename = null, playDiv = 'all', muShut = new Set(), gamesShut = new Set(), linkDraft = null, teamOpen = null, teamFilter = 'all', teamQuery = '', schedDiv = 'all', siteShut = new Set(), scoreEntry = null, sheetOpen = false, schedSite = 'all', searchHits = [], importing = null, compView = null, compSub = 'overview', fieldEdit = null, schedDate = null, muSel = null, schedOpen = false, pendingSpot = null, schedKind = 'game', dirCache = [], navBack = null, editingComp = null, reporting = null, attendingPrac = null, halftimeOpen = false, pointSheet = null, boxSort = null, ptSort = null, editingGame = null, capNotice = null, audioCtx = null;
   const tableSorts = {};
   benchFilter = 'all', insight = null, sampler = null;
   const insightCache = new Map();
@@ -309,6 +309,7 @@
       </div>
       <div class="right">
         ${CAPS.some(([k]) => rv(k, 0)) ? `<span class="chip gclock" id="gclock">${capClock(g)}</span>` : ''}
+        <button type="button" class="btn small-btn" data-a="open-sheet">Scoresheet</button>${g.points.length ? '<button type="button" class="btn small-btn" data-a="open-box">Box score</button>' : ''}
         ${g.points.length ? '<button type="button" class="btn small-btn" data-a="edit-prev">Previous point</button>' : ''}
         ${!live && g.points.length ? '<button type="button" class="btn small-btn" data-a="undo">Undo last point</button>' : ''}
         ${twoTap('end', 'end-game', atEnd ? 'Finish game' : 'End game', 'Tap again to end', atEnd ? 'primary' : '')}
@@ -323,7 +324,8 @@
       const ids = placedIds().filter((id) => line[id] === p.id), min = p[on].min;
       const openReq = Math.max(0, min - ids.length);
       const count = min ? `${ids.length} of ${min} minimum` : String(ids.length);
-      return `<div class="role-group" data-drop="${p.id}"><div class="label">${esc(plural(p.name))} · ${count}</div><div class="cards">
+      const n = ids.length + openReq + (room && !openReq ? 1 : 0);
+      return `<div class="role-group" data-drop="${p.id}"><div class="label">${esc(plural(p.name))} · ${count}</div><div class="cards" style="--cols:${n === 4 || n <= 2 ? 2 : 3}">
         ${ids.map((id) => lineCard(id, p.id)).join('')}
         ${Array.from({ length: openReq }, () => `<button type="button" class="slot" data-a="fill-pos" data-v="${p.id}">Open</button>`).join('')}
         ${room && !openReq ? `<button type="button" class="slot optional" data-a="fill-pos" data-v="${p.id}">Add</button>` : ''}
@@ -478,7 +480,7 @@
     return `${scoreboard(true)}
     <div class="game">
       <section class="panel">
-        <div class="live-top"><div class="timer-wrap"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div>${g.live.review ? '' : `<button type="button" class="btn small-btn" data-a="pause">${g.live.pausedAt ? 'Resume' : 'Pause'}</button>`}</div>
+        <div class="live-top"><div class="timer-wrap"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div>${g.live.review ? '' : `<button type="button" class="btn small-btn" data-a="pause">${g.live.pausedAt ? 'Resume' : 'Pause'}</button>${g.live.pausedAt ? twoTap('reset-clock', 'reset-clock', 'Reset', 'Tap again: back to 0:00') : ''}`}</div>
         ${g.live.review
           ? `<div class="review"><div><h3>${g.live.review.result === 'us' ? 'We scored' : 'They scored'}</h3><p class="small muted">Check the play and the lineup, then finalize.</p></div><div class="chips"><button type="button" class="btn small-btn" data-a="keep-playing">Keep playing</button><button type="button" class="btn primary" data-a="finalize">Finalize point</button></div></div>`
           : '<div class="score-btns"><button type="button" class="btn primary" data-a="result" data-v="us">We scored</button><button type="button" class="btn" data-a="result" data-v="them">They scored</button></div>'}</div>
@@ -508,7 +510,7 @@
     g.points.slice(0, i + 1).forEach((x) => { x.result === 'us' ? us++ : them++; });
     const onField = liveOnField().filter(P);
     return `<section class="panel">
-      <div class="panel-head"><h2>Point ${i + 1}</h2><span class="chip on${p.on}">${p.on === 'O' ? 'Offense' : 'Defense'}</span><span>${p.result === 'us' ? 'We scored' : 'They scored'} · <b>${us}–${them}</b></span>
+      <div class="panel-head"><h2>Point ${i + 1}</h2>${seg('pt-set', p.on, [['O', 'Offense'], ['D', 'Defense']], 'data-k="on"')}${seg('pt-set', p.result, [['us', 'We scored'], ['them', 'They scored']], 'data-k="result"')}<b>${us}–${them}</b>
         <span class="right"><button type="button" class="btn small-btn" data-a="edit-step" data-d="-1" ${i ? '' : 'disabled'}>Earlier</button><button type="button" class="btn small-btn" data-a="edit-step" data-d="1" ${i < len - 1 ? '' : 'disabled'}>Later</button><button type="button" class="btn small-btn primary" data-a="edit-done">Done</button></span></div>
       <div class="time-row"><span class="label">Point length</span><span class="step"><button type="button" data-a="pt-time" data-d="-15" aria-label="15 seconds less">−15</button><input id="pt-time" type="text" inputmode="numeric" data-c="pt-time" value="${clock(p.endedAt - p.startedAt)}" aria-label="Point length, minutes and seconds"><button type="button" data-a="pt-time" data-d="15" aria-label="15 seconds more">+15</button></span></div>
       ${offFieldNote(p)}${fixBar()}${selectionBar()}
@@ -517,7 +519,7 @@
       <div class="panel-head"><span class="label">On the field</span>${legend()}</div>
       <div class="cards">${onField.map(fieldCard).join('')}</div>
       ${fixLine ? `<div class="label">Not on the field</div><div class="list">${S.players.filter((x) => !onField.includes(x.id)).map((x) => benchRow(x.id, true)).join('')}</div>` : ''}
-      <div class="panel-foot"><span class="chips"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><span class="chips"><button type="button" class="btn small-btn opp" data-a="opp-pass">Opponent pass</button><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></span></div>
+      <div class="panel-foot"><span class="chips"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button><button type="button" class="btn small-btn" data-a="pt-insert" data-v="before">Insert point before</button><button type="button" class="btn small-btn" data-a="pt-insert" data-v="after">Insert point after</button>${twoTap('ptdel-' + i, 'pt-delete', 'Delete point', 'Tap again', 'danger')}</span><span class="chips"><button type="button" class="btn small-btn opp" data-a="opp-pass">Opponent pass</button><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></span></div>
     </section>`;
   }
 
@@ -529,7 +531,7 @@
     const here = S.players.filter((p) => !s.out[p.id]).length;
     const next = S.schedule.filter((x) => !x.gameId && x.kind !== 'practice').sort((a, b) => whenKey(a).localeCompare(whenKey(b))).slice(0, 6);
     const last = lastFinal(), pick = s.scheduleId && S.schedule.find((x) => x.id === s.scheduleId), comp = s.competitionId && compOf(s.competitionId);
-    return `${last && !last.sent ? `<div class="banner"><span>Final: ${esc(S.team)} ${last.us}, ${esc(last.opponent || 'Opponent')} ${last.them}.</span><button type="button" class="btn small-btn" data-a="send-open">Send report</button></div>` : ''}
+    return `${last && !last.sent ? `<div class="banner"><span>Final: ${esc(S.team)} ${last.us}, ${esc(last.opponent || 'Opponent')} ${last.them}.</span>${(last.points || []).length ? `<button type="button" class="btn small-btn" data-a="open-sheet" data-v="${last.id}">Scoresheet</button><button type="button" class="btn small-btn" data-a="open-box" data-v="${last.id}">Box score</button>` : ''}<button type="button" class="btn small-btn" data-a="send-open">Send report</button></div>` : ''}
     <section class="panel"><h2>Start a game</h2>
       ${next.length ? `<div class="field"><span class="label">Pick the game</span><div class="pick-games">${next.map((x) => `<button type="button" class="tog game-pick" data-a="pick-scheduled" data-id="${x.id}" aria-pressed="${s.scheduleId === x.id}"><strong>vs ${esc(x.opponent || 'Opponent')}</strong><span class="small">${esc(longDate(x.date))}${x.time ? ' · ' + esc(x.time) : ''}</span><span class="small muted">${compLabel(x)}${x.location ? ' · ' + esc(x.location) : ''}</span></button>`).join('')}</div></div>`
         : '<p class="muted">No games on the schedule. League games appear here once your league schedules them.</p>'}
@@ -542,18 +544,20 @@
 
   /* ---------- Roster ---------- */
   function teamsPanel() {
-    return `<section class="panel"><div class="panel-head"><h2>Your teams</h2></div>
-      <div class="taglist">${Root.teams.map((t) => `<button type="button" class="tog" data-a="switch-team" data-v="${t.id}" aria-pressed="${t.id === S.id}">${esc(t.team)}${t.game ? ' · in game' : ''}</button>`).join('')}</div>
-      <form class="form-row" data-form="team"><label class="field grow"><span class="label">New team</span><input id="new-team" type="text" placeholder="Team name" autocomplete="off"></label><button class="btn primary" type="submit">Add team</button></form>
-      <p class="small muted">A new team starts with this team's rules and an empty roster.</p></section>
-    <section class="panel"><div class="panel-head"><h2>This team</h2><span class="right">${S.history.length || (S.game && S.game.points.length) ? insightBtn('team', S.id, 'Team insights') : ''}</span></div>
-      <div class="form-row"><label class="field grow"><span class="label">This team's name</span><input id="team-name" type="text" data-c="team" value="${esc(S.team)}" autocomplete="off"></label>
+    return `<section class="panel"><div class="panel-head"><h2>This team</h2><span class="right">${S.history.length || (S.game && S.game.points.length) ? insightBtn('team', S.id, 'Team insights') : ''}</span></div>
+      <div class="form-row"><label class="field grow"><span class="label">Team name</span><input id="team-name" type="text" data-c="team" value="${esc(S.team)}" autocomplete="off"></label><label class="field"><span class="label">Nickname</span><input type="text" data-c="team-nick" value="${esc(S.nickname || '')}" placeholder="Prime" autocomplete="off"></label>
       ${Root.teams.length > 1 && isAdmin() ? twoTap('delteam-' + S.id, 'delete-team', 'Delete team', 'Tap again to delete', 'danger') : ''}</div>
+      <div class="field"><span class="label">Linked teams</span><div class="taglist">${(S.links || []).map((l) => `<span class="chip">${Root.teams.some((t) => t.id === l.id) ? `<button type="button" class="linkish" data-a="switch-team" data-v="${l.id}">${esc(l.name)}</button>` : esc(l.name)}<button type="button" data-a="unlink-team" data-v="${l.id}" aria-label="Unlink ${esc(l.name)}">✕</button></span>`).join('')}<input type="text" class="link-input" data-c="add-link" list="link-list" placeholder="Link a team, like your 6th grade team" autocomplete="off"></div>
+        <datalist id="link-list">${[...new Set([...Root.teams.filter((t) => t.id !== S.id).map((t) => t.team), ...dirNames()])].map((n) => `<option value="${esc(n)}"></option>`).join('')}</datalist></div>
       <label class="check"><input type="checkbox" data-c="youth" ${S.youth ? 'checked' : ''}> Youth team <span class="small muted">(Gx/Bx instead of WMP/MMP)</span></label>
       ${isAdmin() ? `<div class="form-row brand-row"><label class="field"><span class="label">Team color</span><input type="color" data-c="team-color" value="${Report.safeColor(S.color)}"></label>
         <div class="field"><span class="label">Logo</span><div class="chips">${S.logo ? `<img class="logo-prev" src="${S.logo}" alt="Team logo">` : ''}<label class="btn small-btn file-btn">${S.logo ? 'Change logo' : 'Upload logo'}<input type="file" accept="image/*" data-c="team-logo" hidden></label>${S.logo ? '<button type="button" class="btn small-btn" data-a="logo-remove">Remove</button>' : ''}</div></div></div>` : (S.logo ? `<img class="logo-prev" src="${S.logo}" alt="Team logo">` : '')}
-      ${S.palette && S.palette.length ? `<p class="small muted">Logo colors: ${S.palette.map((c) => `<i class="pal" style="background:${c}"></i>`).join('')} Pick <b>Current team</b> under Settings → Color scheme to use them.</p>` : ''}</section>`;
+      ${isAdmin() ? `<div class="pal-row"><span class="label">Team colors</span>${['Primary', 'Secondary', 'Tertiary'].map((l, i) => `<label class="pal-pick" title="${l}"><input type="color" data-c="pal" data-i="${i}" value="${((S.palette || [])[i]) || (i ? '#888888' : Report.safeColor(S.color))}"><span class="small">${l}</span></label>`).join('')}</div>` : ''}
+      ${S.palette && S.palette.length ? `<p class="small muted">Pick <b>Current team</b> under Settings → Color scheme to use them.</p>` : ''}</section>`;
   }
+  // The day a finished game was scheduled for, or the day it was played if it wasn't on the schedule.
+  const gameDay = (h, t) => { const x = ((t || S).schedule || []).find((y) => y.gameId === h.id); return x && x.date ? x.date : localDay(new Date(h.date)); };
+  const shortDay = (d) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   const longDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   const lastFinal = () => S.history.find((h) => h.id === S.lastFinal) || S.history[S.history.length - 1];
   const subscribers = () => S.players.flatMap((p) => (p.contacts || []).filter((c) => c.subscribed).map((c) => c.email));
@@ -580,7 +584,8 @@
     };
     const known = [...new Set([...Root.teams.filter((t) => t.id !== S.id).map((t) => t.team), ...dirNames()])];
     return `<section class="panel"><h2>${esc(S.team)} schedule</h2>${rsvpPanel()}${castPanel()}
-      <div class="chips"><button type="button" class="btn small-btn ${schedOpen && schedKind === 'game' ? 'primary' : ''}" data-a="sched-new" data-v="game">Create game</button><button type="button" class="btn small-btn ${schedOpen && schedKind === 'practice' ? 'primary' : ''}" data-a="sched-new" data-v="practice">Add practice</button></div>
+      <div class="chips"><button type="button" class="btn small-btn ${schedOpen && schedKind === 'game' ? 'primary' : ''}" data-a="sched-new" data-v="game">Create game</button><button type="button" class="btn small-btn ${schedOpen && schedKind === 'practice' ? 'primary' : ''}" data-a="sched-new" data-v="practice">Add practice</button><button type="button" class="btn small-btn ${importing ? 'primary' : ''}" data-a="sched-import">Import from text</button>${S.schedule.length ? '<button type="button" class="btn small-btn" data-a="sched-export">Copy as text</button>' : ''}</div>
+      ${importing ? importPanel() : ''}
       ${schedOpen ? `<form class="form-row sched-form" data-form="schedule"><input id="sch-kind" type="hidden" value="${schedKind}">
       ${schedKind === 'practice' ? '' : '<label class="field grow"><span class="label">Opponent</span><input id="sch-opp" type="text" list="opp-list" autocomplete="off" placeholder="Name, or pick a team"></label>'}
       <label class="field"><span class="label">Date</span><input id="sch-date" type="date" required></label><label class="field"><span class="label">Time</span><input id="sch-time" type="text" placeholder="10:00 AM" autocomplete="off"></label>
@@ -600,6 +605,16 @@
     if (hit) { x.oppTeamId = hit.id; if (CloudLink && CloudLink.user && S.access) CloudLink.fixture(S, x); } else { delete x.oppTeamId; }
   }
   const dirNames = () => dirCache.map((d) => d.name);
+  function importPanel() {
+    const rows = importing.rows;
+    return `<div class="import-box"><label class="field"><span class="label">Paste a schedule: one game or practice per line</span><textarea id="import-text" rows="6" placeholder="Sat Nov 14 9am vs Tigers at Franklin HS East&#10;Practice Tue 11/17 5:30pm at Garfield">${esc(importing.text || '')}</textarea></label>
+      <div class="chips"><button type="button" class="btn small-btn primary" data-a="import-read">Read schedule</button>${aiReady() ? `<button type="button" class="btn small-btn" data-a="import-ai" ${importing.busy ? 'disabled' : ''}>${importing.busy ? 'Reading…' : '✨ Read with AI'}</button>` : ''}<button type="button" class="btn small-btn" data-a="sched-import">Cancel</button></div>
+      ${rows ? (rows.length ? `<div class="import-rows">${rows.map((x, i) => `<label class="import-row"><input type="checkbox" data-a="import-toggle" data-i="${i}" ${x.on ? 'checked' : ''}><span><strong>${esc(longDate(x.date))}${x.time ? ' · ' + esc(x.time) : ''}</strong> ${x.kind === 'practice' ? 'Practice' : `vs ${esc(x.opponent)}`}${x.location ? ` <span class="muted">at ${esc(x.location)}</span>` : ''}</span></label>`).join('')}</div><div class="chips"><button type="button" class="btn primary" data-a="import-add">Add ${rows.filter((x) => x.on).length} to the schedule</button></div>` : '<p class="small muted">No dates found. Each line needs a date like Nov 14, 11/14 or 2026-11-14.</p>') : ''}</div>`;
+  }
+  function copyText(txt, ok) {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => flash(ok), () => { importing = { text: txt, rows: null }; render(); flash('Copying was blocked; the text is in the box.'); });
+    else { importing = { text: txt, rows: null }; render(); }
+  }
   const localDay = (d) => { const x = d || new Date(); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
   // Players whose family said no start the game marked as not here.
   const rsvpOut = (gameId) => Object.fromEntries(Object.values(S.rsvpAnswers || {}).filter((v) => v.game === gameId && v.status === 'no').map((v) => [v.player, true]));
@@ -639,12 +654,83 @@
       <div class="label">What families get</div>
       <div class="rp report-preview">${Report.fragment(S)}</div></div></div>`;
   }
+  // Every team this account can see: its own, listed teams, and teams that exist only as names in a competition.
+  function allTeams() {
+    const map = new Map();
+    const add = (id, f) => { const cur = map.get(id) || { id, comps: [] }; map.set(id, { ...cur, ...f, comps: cur.comps }); return map.get(id); };
+    Root.teams.forEach((t) => add(t.id, { kind: 'mine', name: t.team, nick: t.nickname || '', logo: t.logo || '', color: t.color || '', youth: !!t.youth, players: t.players.length, inGame: !!t.game, example: !!t.isExample }));
+    dirCache.forEach((d) => { if (!map.has(d.id)) add(d.id, { kind: 'listed', name: d.name, color: d.color || '' }); });
+    comps().forEach((c) => (c.groups || []).forEach((g) => (g.teams || []).forEach((tm) => {
+      const x = map.get(tm.id) || add(tm.id, { kind: tm.id.startsWith('name:') ? 'open' : 'listed', name: tm.name });
+      if (x.kind !== 'mine') Object.assign(x, { name: tm.name, ...(tm.nick ? { nick: tm.nick } : {}), ...(tm.logo ? { logo: tm.logo } : {}), ...(tm.color ? { color: tm.color } : {}), ...(tm.palette ? { palette: tm.palette } : {}), ...(tm.links ? { links: tm.links } : {}) });
+      x.comps.push({ id: c.id, label: `${c.name} · ${g.name}` });
+    })));
+    return [...map.values()].sort((x, y) => x.name.localeCompare(y.name));
+  }
+  function teamsList() {
+    const kinds = [['all', 'All'], ['mine', 'My teams'], ['listed', 'Other teams'], ['open', 'No admin']];
+    if (teamComp !== 'all' && !compOf(teamComp)) teamComp = 'all';
+    const q = teamQuery.toLowerCase(), list = allTeams().filter((t) => (teamFilter === 'all' || t.kind === teamFilter) && (teamComp === 'all' || t.comps.some((c) => c.id === teamComp)) && (!q || t.name.toLowerCase().includes(q) || (t.nick || '').toLowerCase().includes(q)));
+    const badge = (t) => (t.kind === 'open' ? '<span class="tag-comp friendly">No admin</span>' : t.kind === 'listed' ? '<span class="tag-comp friendly">Not yours</span>' : '') + (t.youth ? ' <span class="tag-comp">Youth</span>' : '') + (t.inGame ? ' <span class="live-chip">● In game</span>' : '');
+    return `<section class="panel"><div class="panel-head"><h2>Teams</h2><span class="small muted">${list.length} shown</span></div>
+      <div class="form-row"><label class="field grow"><span class="label">Find a team</span><input type="search" data-input="team-q" value="${esc(teamQuery)}" placeholder="Name or nickname" autocomplete="off"></label><div class="field"><span class="label">Show</span>${seg('team-filter', teamFilter, kinds)}</div>${comps().length ? `<label class="field"><span class="label">Competition</span><select data-c="team-comp"><option value="all">All competitions</option>${comps().map((c) => `<option value="${c.id}" ${teamComp === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>` : ''}</div>
+      <div class="team-list">${list.map((t) => `<button type="button" class="team-card" data-a="team-open" data-id="${esc(t.id)}">
+        <span class="team-mark" style="background:${Report.safeColor(t.color)}">${t.logo ? `<img src="${t.logo}" alt="">` : esc((t.name || '?').slice(0, 1))}</span>
+        <span class="team-text"><strong>${esc(t.name)}${t.nick ? ` <span class="muted">“${esc(t.nick)}”</span>` : ''}</strong><span class="small">${badge(t)}</span><span class="small muted">${t.kind === 'mine' ? `${t.players} players` : ''}${t.comps.length ? `${t.kind === 'mine' ? ' · ' : ''}${t.comps.map((c) => esc(c.label)).join(', ')}` : ''}</span></span></button>`).join('') || '<p class="muted">No teams match.</p>'}</div></section>
+    <section class="panel"><h2>Add a team</h2><form class="form-row" data-form="team"><label class="field grow"><span class="label">Team name</span><input id="new-team" type="text" placeholder="Whitman 7th" autocomplete="off"></label><button class="btn primary" type="submit">Add team</button></form><p class="small muted">A new team starts with the current team's rules and an empty roster.</p></section>`;
+  }
+  // Teams with no admin keep their details on the competitions that list them; those competitions' admins look after them.
+  function phEditor(t) {
+    const pal = t.palette && t.palette.length ? t.palette : [Report.safeColor(t.color)];
+    return `<div class="ph-edit"><div class="form-row"><label class="field grow"><span class="label">Team name</span><input type="text" data-c="ph-name" data-id="${esc(t.id)}" value="${esc(t.name)}" autocomplete="off"></label><label class="field"><span class="label">Nickname</span><input type="text" data-c="ph-nick" data-id="${esc(t.id)}" value="${esc(t.nick || '')}" autocomplete="off"></label></div>
+      <div class="form-row brand-row"><div class="field"><span class="label">Logo</span><div class="chips">${t.logo ? `<img class="logo-prev" src="${t.logo}" alt="">` : ''}<label class="btn small-btn file-btn">${t.logo ? 'Change logo' : 'Upload logo'}<input type="file" accept="image/*" data-c="ph-logo" data-id="${esc(t.id)}" hidden></label>${t.logo ? `<button type="button" class="btn small-btn" data-a="ph-logo-rm" data-id="${esc(t.id)}">Remove</button>` : ''}</div></div>
+        <div class="pal-row"><span class="label">Team colors</span>${['Primary', 'Secondary', 'Tertiary'].map((l, i) => `<label class="pal-pick"><input type="color" data-c="ph-pal" data-id="${esc(t.id)}" data-i="${i}" value="${pal[i] || '#888888'}"><span class="small">${l}</span></label>`).join('')}</div></div></div>`;
+  }
+  function phUpdate(id, patch) {
+    comps().forEach((c) => {
+      let hit = false;
+      (c.groups || []).forEach((g) => (g.teams || []).forEach((tm) => { if (tm.id === id) { Object.assign(tm, patch); hit = true; } }));
+      (c.matchups || []).forEach((m) => [m.a, m.b].forEach((x) => { if (x.id === id && patch.name) { x.name = patch.name; if (m.slot) publishMatchup(c, m); } }));
+      if (hit) touchComp(c);
+    });
+  }
+  const canEditTeam = (id) => !!(CloudLink && CloudLink.god) || comps().some((c) => isCompAdmin(c) && teamInComp(c, id));
+  function teamInfo(id) {
+    const t = allTeams().find((x) => x.id === id);
+    if (!t) { teamOpen = null; return teamsList(); }
+    const open = t.kind === 'open', edit = open && canEditTeam(id);
+    const when = (m) => (m.slot ? m.slot.date + m.slot.start : m.date || '');
+    const games = comps().flatMap((c) => (c.matchups || []).filter((m) => (m.slot || m.result) && (m.a.id === id || m.b.id === id)).map((m) => ({ c, m }))).sort((x, y) => when(x.m).localeCompare(when(y.m)));
+    const links = [...(t.links || []), ...Root.teams.filter((o) => (o.links || []).some((l) => l.id === id)).map((o) => ({ id: o.id, name: o.team }))].filter((l, i, all) => all.findIndex((q) => q.id === l.id) === i);
+    const others = allTeams().filter((x) => x.id !== id && !x.example);
+    return `<section class="panel"><div class="panel-head"><button type="button" class="btn small-btn back" data-a="team-close" aria-label="All teams">←</button><h2>${esc(t.name)}</h2><span class="small muted">${open ? 'No admin yet. Its competitions\' admins look after it.' : 'Run by its own coaches'}</span></div>
+      ${t.comps.length ? `<div class="label">Competitions</div><div class="taglist">${t.comps.map((c) => `<button type="button" class="chip" data-a="comp-open" data-id="${c.id}" data-go="1">${esc(c.label)}</button>`).join('')}</div>` : ''}
+      <div class="label">Games</div>${games.map(({ c, m }) => { const f = m.slot && fieldById(c, m.slot.fieldId); return `<div class="sub-row"><span><strong>${esc(longDate(m.slot ? m.slot.date : m.date))}${m.slot ? ' · ' + ampm(m.slot.start) : ''}</strong> ${esc(m.a.name)} vs ${esc(m.b.name)} <span class="small muted">${f ? esc(f.label) + ' · ' : ''}${esc(c.name)}${m.playoff ? ' · playoff' : ''}</span></span>${m.result ? `<b>${m.result.a}–${m.result.b}</b>` : ''}</div>`; }).join('') || '<p class="small muted">None yet.</p>'}
+      ${links.length || edit ? `<div class="label">Linked teams</div><div class="taglist">${links.map((l) => `<span class="chip"><button type="button" class="linkish" data-a="team-open" data-id="${esc(l.id)}">${esc(l.name)}</button>${edit ? `<button type="button" data-a="ph-unlink" data-id="${esc(id)}" data-v="${esc(l.id)}" aria-label="Unlink ${esc(l.name)}">✕</button>` : ''}</span>`).join('')}${edit ? `<input type="text" class="link-input" data-c="ph-link" data-id="${esc(id)}" list="all-team-list" placeholder="Link a team" autocomplete="off">` : ''}</div>` : ''}
+      ${edit ? phEditor(t) : ''}</section>
+      ${edit ? `<section class="panel"><h2>Team admin</h2><p class="small muted">Give ${esc(t.name)} an admin and it's theirs to run: roster, staff, games and stats. It's added to the app with them as team admin; you stay on its staff until they remove you.</p>
+        <form class="form-row" data-form="team-admin" data-id="${esc(id)}"><label class="field grow"><span class="label">Their Google email</span><input name="email" type="email" autocomplete="off" required></label><button class="btn primary" type="submit">Make them admin</button></form>
+        <div class="chips"><button type="button" class="btn" data-a="team-adopt" data-id="${esc(id)}">Run it myself</button></div></section>
+        <section class="panel"><h2>Merge</h2><p class="small muted">For a team entered twice. Its games, results, seeds and links move to the team you pick, and this record goes away.</p>
+        <form class="form-row" data-form="team-merge" data-id="${esc(id)}"><label class="field grow"><span class="label">Merge ${esc(t.name)} into</span><select name="to">${others.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}${x.kind === 'mine' ? ' (yours)' : x.kind === 'open' ? ' (no admin)' : ''}</option>`).join('')}</select></label><button class="btn" type="submit">Merge</button></form></section>` : ''}
+      <datalist id="all-team-list">${others.map((x) => `<option value="${esc(x.name)}"></option>`).join('')}</datalist>`;
+  }
+  // Put a team with no admin on this device as a real team, keeping its id's games.
+  function adoptTeam(id) {
+    const old = allTeams().find((x) => x.id === id);
+    if (!old) return null;
+    const t = blank(JSON.parse(JSON.stringify(S.rules)), old.name); Object.assign(t, { nickname: old.nick || '', logo: old.logo || undefined, color: old.color || undefined, palette: old.palette || undefined, links: (old.links || []).slice() }); Root.teams.push(t);
+    mergeTeamRefs(id, { id: t.id, name: t.team });
+    (old.links || []).forEach((l) => { const o = Root.teams.find((x) => x.id === l.id); if (o) o.links = (o.links || []).filter((x) => x.id !== id && x.id !== t.id).concat({ id: t.id, name: t.team }); });
+    return t;
+  }
   function rosterScreen() {
-    if (teamView === 'coaches') return `${teamsPanel()}${teamSeg()}${coachesPanel()}`;
-    if (teamView === 'lines') return `${teamsPanel()}${teamSeg()}${linesPanel()}`;
+    const back = '<div class="chips"><button type="button" class="btn small-btn" data-a="team-close">← All teams</button></div>';
+    if (teamView === 'coaches') return `${back}${teamsPanel()}${teamSeg()}${staffPanel()}`;
+    if (teamView === 'lines') return `${back}${teamsPanel()}${teamSeg()}${linesPanel()}`;
     const skills = allSkills(), g = S.game;
-    return `${teamsPanel()}${teamSeg()}${gamesPanel()}<section class="panel"><div class="panel-head"><h2>${esc(S.team)} roster</h2><span class="small muted">Tap a number to change it. Tap a name for jersey, tags and playtime.</span></div>
-      <form class="form-row" data-form="add"><label class="field grow"><span class="label">Add players (separate names with commas)</span><input id="add-name" type="text" placeholder="Sam, Priya, Theo" autocomplete="off"></label><button class="btn primary" type="submit">Add</button></form>
+    return `${back}${teamsPanel()}${teamSeg()}${gamesPanel()}<section class="panel"><div class="panel-head"><h2>${esc(S.team)} roster</h2><span class="small muted">Tap a number to change it. Tap a name for jersey, tags and playtime.</span></div>
+      <form class="form-row" data-form="add"><label class="field grow"><span class="label">Add players (separate names with commas)</span><input id="add-name" type="text" data-input="person-search" placeholder="Sam, Priya, Theo" autocomplete="off"><span id="person-hits" class="person-hits"></span></label><button class="btn primary" type="submit">Add</button></form>
       ${S.players.length ? `<div class="tbl-scroll"><table><thead><tr><th>Player</th>${g ? '<th>This game</th>' : ''}${skills.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
       ${S.players.map((p) => `<tr><td><button type="button" class="who" data-a="edit" data-id="${p.id}"><span class="who-row">${tile(p, true)}<strong>${esc(p.name)}</strong></span><span>${[p.target !== 'average' ? `${TARGET_LABEL[p.target]} time` : '', `Min ${E.minPointsOf(p)}`, ...p.tags].filter(Boolean).map(esc).join(' · ')}</span></button></td>
       ${g ? `<td><button type="button" class="tog here" data-a="sit" data-id="${p.id}" aria-pressed="${!g.out[p.id]}">${g.out[p.id] ? 'Not here' : 'Here'}</button></td>` : ''}
@@ -656,6 +742,9 @@
     return `<div class="scrim" data-a="close-sheet" data-self="1"><div class="sheet" role="dialog" aria-label="Edit ${esc(p.name)}">
       <div class="form-row"><label class="field grow"><span class="label">Name</span><input id="edit-name" type="text" data-c="edit-name" value="${esc(p.name)}" autocomplete="off"></label>
       <label class="field jersey"><span class="label">Jersey</span><input id="edit-no" type="text" inputmode="numeric" data-c="edit-no" value="${esc(p.no)}" autocomplete="off"></label><button type="button" class="btn primary" data-a="close-sheet">Done</button></div>
+      <div class="form-row"><label class="field grow"><span class="label">Nickname</span><input type="text" data-c="edit-nick" value="${esc(p.nick || '')}" placeholder="Shown with their name" autocomplete="off"></label>
+        <label class="check"><input type="checkbox" data-a="edit-youth" ${p.youth ? 'checked' : ''}> Youth player</label></div>
+      ${(() => { const per = personFor(p); return `<div class="field"><span class="label">Account</span><div class="form-row"><label class="field grow"><span class="label">${p.youth ? 'Player email (optional for youth players)' : "Player's Google email"}</span><input type="email" data-c="edit-email" value="${esc(per.email || '')}" autocomplete="off"></label><span class="small muted">${per.uid ? 'Signed in' : per.email ? 'Placeholder until they sign in' : 'Placeholder'}</span></div>${p.youth ? `<p class="small muted">Parents listed below (Who: Parent) manage this player's account.${(per.guardians || []).length ? ' Parents: ' + per.guardians.map(esc).join(', ') : ''}</p>` : ''}</div>`; })()}
       <div class="field"><span class="label">Gender</span>${seg('set-match', p.match, [['M', S.youth ? 'Boy (Bx)' : 'Male (MMP)'], ['W', S.youth ? 'Girl (Gx)' : 'Female (WMP)']])}</div>
       ${allSkills().map(([k, l]) => `<div class="field"><span class="label">${esc(l)}</span><div class="pips">${[1, 2, 3, 4, 5].map((v) => `<button type="button" data-a="set-skill" data-k="${k}" data-v="${v}" aria-pressed="${E.rate(p, k) === v}">${v}</button>`).join('')}</div></div>`).join('')}
       <div class="field"><span class="label">Tags</span><div class="taglist">${rules().tags.map((t) => `<button type="button" class="tog" data-a="toggle-tag" data-v="${esc(t)}" aria-pressed="${p.tags.includes(t)}">${esc(t)}</button>`).join('')}</div></div>
@@ -664,7 +753,7 @@
       <label class="field"><span class="label">Sounds like (for voice)</span><input id="edit-alias" type="text" data-c="edit-alias" value="${esc(p.aliases || '')}" placeholder="Other spellings or nicknames, separated by commas" autocomplete="off"></label>
       <div class="field"><span class="label">Contacts for stats emails</span>
         ${(p.contacts || []).map((c) => `<div class="sub-row"><span><strong>${esc(c.name || c.email)}</strong> <span class="small muted">${esc(c.relation)} · ${esc(c.email)}</span></span><span class="chips"><button type="button" class="tog here" data-a="toggle-sub" data-id="${p.id}" data-v="${c.id}" aria-pressed="${c.subscribed}">${c.subscribed ? 'Subscribed' : 'Off'}</button><button type="button" class="btn small-btn danger" data-a="del-contact" data-v="${c.id}">Remove</button></span></div>`).join('')}
-        <form class="form-row" data-form="contact"><label class="field grow"><span class="label">Name</span><input id="c-name" type="text" autocomplete="off"></label><label class="field grow"><span class="label">Email</span><input id="c-email" type="email" autocomplete="off" required></label><label class="field"><span class="label">Who</span><select id="c-rel"><option>Parent</option><option>Player</option></select></label><button class="btn" type="submit">Add</button></form></div>
+        <form class="form-row" data-form="contact"><label class="field grow"><span class="label">Name</span><input id="c-name" type="text" autocomplete="off"></label><label class="field grow"><span class="label">Email</span><input id="c-email" type="email" autocomplete="off" required></label><label class="field"><span class="label">Who</span><select id="c-rel"><option>Parent</option><option>Guardian</option><option>Player</option><option>Other</option></select></label><button class="btn" type="submit">Add</button></form></div>
       <div>${twoTap('del-' + p.id, 'delete-player', 'Remove player', 'Tap again to remove', 'danger')}</div>
     </div></div>`;
   }
@@ -686,10 +775,10 @@
   const ptHead = (k, label, cls, st) => `<span class="${cls}"><button type="button" class="sorth" data-a="pt-sort" data-v="${k}" ${st.key === k ? `aria-sort="${st.dir < 0 ? 'descending' : 'ascending'}"` : ''}>${label}${st.key === k ? (st.dir < 0 ? ' ▾' : ' ▴') : ''}</button></span>`;
   function playtimeScreen() {
     const g = G(), showSeason = seasonView || !g;
-    const viewSeg = seg('pt-view', ptView, [['time', 'Playtime'], ['stats', 'Box Score'], ['points', 'Points'], ['sheet', 'Scoresheet'], ['combos', 'Combos']]);
+    const viewSeg = seg('pt-view', ptView, [['time', 'Playtime'], ['points', 'Points'], ['combos', 'Combos']]);
     if (ptView === 'points') return pointsScreen(viewSeg);
-    if (ptView === 'sheet') return scoresheetScreen(viewSeg);
-    if (ptView === 'stats') return statsScreen(viewSeg);
+    if (ptView === 'sheet') ptView = 'points';
+    if (ptView === 'stats') ptView = 'time';
     if (ptView === 'combos') return combosScreen(viewSeg);
     const toggle = `<span class="right">${viewSeg}${seg('season', showSeason ? 'season' : 'game', [...(g ? [['game', 'This game']] : []), ['season', 'Season']])}</span>`;
     let body = '';
@@ -717,7 +806,7 @@
     const count = (pts, who) => pts.filter((p) => p.result === who).length;
     const dated = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     return [...(g ? [{ key: 'current', label: `This game vs ${g.opponent || 'Opponent'}`, opponent: g.opponent, points: g.points }] : []),
-      ...S.history.filter((h) => h.points).slice().reverse().map((h) => ({ key: h.id, label: `${dated(h.date)} vs ${h.opponent || 'Opponent'}, ${h.us}–${h.them}`, opponent: h.opponent, points: h.points }))]
+      ...S.history.filter((h) => h.points).slice().reverse().map((h) => ({ key: h.id, label: `${shortDay(gameDay(h))} vs ${h.opponent || 'Opponent'}, ${h.us}–${h.them}`, opponent: h.opponent, points: h.points }))]
       .map((x) => ({ ...x, us: count(x.points, 'us'), them: count(x.points, 'them') }));
   }
   const pickSource = (sources) => sources.find((x) => x.key === pointsSource) || sources[0];
@@ -832,11 +921,16 @@
     const scores = pts.map((p) => { p.result === 'us' ? u++ : t++; return `${u}-${t}`; });
     const halfIdx = (() => { let u = 0, t = 0; for (let i = 0; i < pts.length; i++) { pts[i].result === 'us' ? u++ : t++; if (Math.max(u, t) >= rules().halfAt) return i; } return -1; })();
     const hc = (i) => (i === halfIdx && i < pts.length - 1 ? ' half-line' : '');
-    const heads = pts.map((p, i) => `<th class="${p.result === 'us' ? 'us' : ''}${hc(i)}">${i + 1}</th>`).join('');
-    const body = sheetGroups(pts).filter(([, list]) => list.length).map(([label, list]) => `<tr class="ss-group"><th class="ss-name">${label}</th><td colspan="${pts.length}"></td></tr>` + list.map((p) => `<tr><th class="ss-name"><span class="ss-who">${tile(p, true)}<span>${pLink(p)}</span></span></th>${pts.map((pt, i) => `<td class="${pt.result === 'us' ? 'us' : ''}${hc(i)}" aria-label="${sets[i].has(p.id) ? 'Played' : 'Sat'} point ${i + 1}">${sets[i].has(p.id) ? slash(weights[i]) : ''}${marks(pt, p.id)}</td>`).join('')}</tr>`).join('')).join('');
+    // Between points in the current game, a column for the next point: tap a player to put them on or take them off.
+    const g = G(), nextCol = src.key === 'current' && g && !g.live, line = nextCol ? g.draft.line : {}, full = nextCol && placedIds().length >= targetSize();
+    const nextHead = nextCol ? `<th class="ss-next">Next</th>` : '', nextOn = nextCol ? `<th class="ss-next">${ctx().on}</th>` : '';
+    const nextCell = (p) => (!nextCol ? '' : g.out[p.id] ? '<td class="ss-next out" aria-label="Not here">–</td>' : `<td class="ss-next ${line[p.id] ? 'in' : ''}"><button type="button" data-a="sheet-line" data-id="${p.id}" aria-pressed="${!!line[p.id]}" aria-label="${line[p.id] ? 'Take off' : 'Put on'} the next point" ${!line[p.id] && full ? 'disabled' : ''}>${line[p.id] ? '●' : ''}</button></td>`);
+    const heads = pts.map((p, i) => `<th class="${p.result === 'us' ? 'us' : ''}${hc(i)}">${i + 1}</th>`).join('') + nextHead;
+    const body = sheetGroups(pts).filter(([, list]) => list.length).map(([label, list]) => `<tr class="ss-group"><th class="ss-name">${label}</th><td colspan="${pts.length + (nextCol ? 1 : 0)}"></td></tr>` + list.map((p) => `<tr><th class="ss-name"><span class="ss-who">${tile(p, true)}<span>${pLink(p)}</span></span></th>${pts.map((pt, i) => `<td class="${pt.result === 'us' ? 'us' : ''}${hc(i)}" aria-label="${sets[i].has(p.id) ? 'Played' : 'Sat'} point ${i + 1}">${sets[i].has(p.id) ? slash(weights[i]) : ''}${marks(pt, p.id)}</td>`).join('')}${nextCell(p)}</tr>`).join('')).join('');
     return `<section class="panel landscape">${head}${sourceSelect(sources, src)}${pts.length ? '<div class="chips"><button type="button" class="btn small-btn" data-a="print-sheet">Printable PDF</button></div>' : ''}
       <p class="small muted ss-key">${slash('short')} short point ${slash('')} typical ${slash('long')} long point <span class="ss-tint"></span> we scored · <b class="mk mk-a">A</b> assist <b class="mk mk-g">G</b> goal <b class="mk mk-t">T</b> turnover <b class="mk mk-d">D</b> block</p>
-      ${pts.length ? `<div class="tbl-wrap"><table class="ss"><thead><tr><th class="ss-name">Point</th>${heads}</tr><tr><th class="ss-name">Started on</th>${pts.map((p, i) => `<th class="${p.result === 'us' ? 'us' : ''}${hc(i)}">${p.on}</th>`).join('')}</tr></thead><tbody>${body}</tbody><tfoot><tr><th class="ss-name">Score</th>${scores.map((s, i) => `<td class="${pts[i].result === 'us' ? 'us' : ''}${hc(i)}">${s}</td>`).join('')}</tr></tfoot></table></div>` : '<p class="muted">No points played yet.</p>'}</section>`;
+      ${nextCol ? `<p class="small">Next point: <b>${placedIds().length} of ${targetSize()}</b> picked. Tap the Next column to put players on or take them off.</p>` : ''}
+      ${pts.length || nextCol ? `<div class="tbl-wrap"><table class="ss"><thead><tr><th class="ss-name">Point</th>${heads}</tr><tr><th class="ss-name">Started on</th>${pts.map((p, i) => `<th class="${p.result === 'us' ? 'us' : ''}${hc(i)}">${p.on}</th>`).join('')}${nextOn}</tr></thead><tbody>${body}</tbody><tfoot><tr><th class="ss-name">Score</th>${scores.map((s, i) => `<td class="${pts[i].result === 'us' ? 'us' : ''}${hc(i)}">${s}</td>`).join('')}${nextCol ? '<td class="ss-next"></td>' : ''}</tr></tfoot></table></div>` : '<p class="muted">No points played yet.</p>'}</section>`;
   }
   function statsScreen(viewSeg) {
     const sources = gameSources(), head = viewHead('Box Score', viewSeg);
@@ -1006,7 +1100,7 @@ ${JSON.stringify(data)}`;
     const src = pickSource(gameSources());
     if (!src || !src.points.length) return;
     const rows = sheetGroups(src.points).flatMap(([, list]) => list).map((p) => ({ id: p.id, name: p.name, no: p.no, match: p.match }));
-    const rec = gameRec(src.key), when = rec ? new Date(rec.startedAt || rec.date) : new Date();
+    const rec = gameRec(src.key), sx = rec && S.schedule.find((y) => y.gameId === rec.id || (rec.scheduleId && y.id === rec.scheduleId)), when = sx && sx.date ? new Date(sx.date + 'T12:00:00') : rec ? new Date(rec.startedAt || rec.date) : new Date();
     const bytes = Report.scoresheetPdf({ title: `${S.team} vs ${src.opponent || 'Opponent'}`, subtitle: `${when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${src.key === 'current' ? 'Score' : 'Final'} ${src.us}-${src.them}`, points: src.points, rows, mixed: mixed(), halfAt: rules().halfAt });
     const filename = `${S.team}-vs-${src.opponent || 'opponent'}-scoresheet.pdf`.replace(/[^A-Za-z0-9.]+/g, '-');
     const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
@@ -1029,21 +1123,52 @@ ${JSON.stringify(data)}`;
   /* ---------- Every game on every team ---------- */
   function gamesScreen() {
     const watch = (rec) => (rec && Report.videoUrl(rec.video) ? `<a class="btn small-btn" href="${esc(Report.videoUrl(rec.video))}" target="_blank" rel="noopener">▶ Video</a>` : '');
-        const upcoming = [], live = [], done = [];
+    const today = localDay(), live = [], todays = [], upcoming = [], done = [];
     const dated = (ms) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const seen = new Set(), canLink = comps().some(isCompAdmin);
     Root.teams.forEach((t) => {
-      if (t.game) live.push({ t, sort: t.game.startedAt, title: `vs ${t.game.opponent || 'Opponent'}`, when: dated(t.game.startedAt), score: `${t.game.points.filter((p) => p.result === 'us').length}–${t.game.points.filter((p) => p.result === 'them').length}`, btn: `${watch(t.game)}<button type="button" class="btn small-btn primary" data-a="open-any" data-team="${t.id}" data-v="current">Open</button>` });
-      (t.schedule || []).filter((x) => !x.gameId && x.kind !== 'practice').forEach((x) => upcoming.push({ t, sort: new Date(`${x.date}T12:00:00`).getTime(), title: `vs ${x.opponent || 'Opponent'}`, when: `${longDate(x.date)}${x.time ? ' · ' + x.time : ''}${x.location ? ' · ' + x.location : ''}`, score: '', btn: t.game ? '' : `<button type="button" class="btn small-btn" data-a="any-start" data-team="${t.id}" data-id="${x.id}">Start</button>` }));
-      t.history.forEach((h) => done.push({ t, sort: h.date, title: `vs ${h.opponent || 'Opponent'}`, when: dated(h.date), score: `${h.us}–${h.them}`, btn: `${watch(h)}<button type="button" class="btn small-btn" data-a="open-any" data-team="${t.id}" data-v="${h.id}">Box score</button>` }));
+      if (t.game) live.push({ t, kind: 'live', key: t.game.id, sort: '0', title: `${t.team} vs ${t.game.opponent || 'Opponent'}`, when: dated(t.game.startedAt), score: `${t.game.points.filter((p) => p.result === 'us').length}–${t.game.points.filter((p) => p.result === 'them').length}`, btn: `${watch(t.game)}<button type="button" class="btn small-btn primary" data-a="open-any" data-team="${t.id}" data-v="current">Open</button>` });
+      (t.schedule || []).filter((x) => x.kind !== 'practice').forEach((x) => {
+        if (x.fixtureId) seen.add(x.fixtureId);
+        if (x.gameId) return;
+        if (t.game && t.game.scheduleId === x.id) return;
+        const row = { t, kind: 'upcoming', key: x.id, sort: whenKey(x), title: `${t.team} vs ${x.opponent || 'Opponent'}`, when: `${longDate(x.date)}${x.time ? ' · ' + x.time : ''}${x.location ? ' · ' + x.location : ''}`, score: '', comp: x.competitionId ? compLabel(x) : '' };
+        if (x.date < today) done.push({ ...row, btn: `${t.game ? '' : `<button type="button" class="btn small-btn" data-a="any-start" data-team="${t.id}" data-id="${x.id}">Open</button>`}<button type="button" class="btn small-btn primary" data-a="score-open" data-team="${t.id}" data-id="${x.id}">Enter score</button>` });
+        else (x.date === today ? todays : upcoming).push({ ...row, btn: t.game ? '' : `<button type="button" class="btn small-btn ${x.date === today ? 'primary' : ''}" data-a="any-start" data-team="${t.id}" data-id="${x.id}">Start</button>` });
+      });
+      t.history.forEach((h) => { const x = t.schedule.find((y) => y.gameId === h.id); if (x && x.fixtureId) seen.add(x.fixtureId); done.push({ t, kind: 'done', key: h.id, sort: whenKey({ date: gameDay(h, t), time: x ? x.time : '' }), title: `${t.team} vs ${h.opponent || 'Opponent'}`, when: `${longDate(gameDay(h, t))}${x && x.time ? ' · ' + x.time : ''}`, score: `${h.us}–${h.them}`, comp: h.competitionId ? compLabel(h) : x && x.competitionId ? compLabel(x) : '', opp: h.opponent, grp: h.group || (x && x.group) || '', btn: `${!h.matchupId && !(x && x.fixtureId) && canLink ? `<button type="button" class="btn small-btn" data-a="link-open" data-team="${t.id}" data-id="${h.id}" data-comp="${esc(h.competitionId || (x && x.competitionId) || '')}">Link to league</button>` : ''}${watch(h)}${(h.points || []).length ? `<button type="button" class="btn small-btn" data-a="open-any" data-team="${t.id}" data-v="${h.id}">Box score</button>` : '<span class="small muted">Score only</span>'}` }); });
     });
-    upcoming.sort((a, b) => a.sort - b.sort); done.sort((a, b) => b.sort - a.sort);
-    const row = (g) => `<div class="game-row"><div class="game-info"><strong>${esc(g.t.team)} ${esc(g.title)}${g.score ? ` · ${g.score}` : ''}</strong><span class="small muted">${esc(g.when)}</span></div><div class="chips">${g.btn}</div></div>`;
-    const block = (title, list) => (list.length ? `<div class="label">${title}</div>${list.map(row).join('')}` : '');
-    return `<section class="panel"><h2>Games</h2>${block('In progress', live)}${block('Upcoming', upcoming)}${block('Finished', done) || (live.length || upcoming.length ? '' : '<p class="muted">No games yet. Add one under Teams.</p>')}</section>`;
+    // League games between teams that aren't ours, from competitions we run or play in.
+    myComps().forEach((c) => (c.matchups || []).filter((m) => m.slot && !seen.has(m.id)).forEach((m) => {
+      const f = fieldById(c, m.slot.fieldId), x = { date: m.slot.date, time: ampm(m.slot.start) };
+      const row = { league: true, c, m, kind: 'league', key: m.id, sort: whenKey(x), title: `${m.a.name} vs ${m.b.name}`, when: `${longDate(m.slot.date)} · ${ampm(m.slot.start)}${f ? ' · ' + f.label : ''}`, score: m.result ? `${m.result.a}–${m.result.b}` : '', comp: `<span class="tag-comp">${esc(c.name)}${m.group ? ' · ' + esc(m.group) : ''}</span>` };
+      const btn = isCompAdmin(c) ? `<button type="button" class="btn small-btn ${m.result ? '' : 'primary'}" data-a="score-open" data-comp="${c.id}" data-id="${m.id}">${m.result ? 'Edit score' : 'Enter score'}</button>` : '';
+      if (m.result || m.slot.date < today) done.push({ ...row, btn });
+      else (m.slot.date === today ? todays : upcoming).push({ ...row, btn });
+    }));
+    upcoming.sort((a, b) => a.sort.localeCompare(b.sort)); todays.sort((a, b) => a.sort.localeCompare(b.sort)); done.sort((a, b) => a.sort.localeCompare(b.sort));
+    const del = (g) => (g.league ? '' : twoTap(`anydel-${g.t.id}-${g.key}`, 'any-del', 'Delete', g.kind === 'upcoming' ? 'Tap again' : 'Tap again: deletes its stats', 'danger', `data-team="${g.t.id}" data-kind="${g.kind}" data-id="${esc(g.key)}"`));
+    const row = (g) => `<div class="game-row"><div class="game-info"><strong>${esc(g.title)}${g.score ? ` · ${g.score}` : ''}</strong><span class="small muted">${esc(g.when)}${g.comp ? ' · ' : ''}${g.comp || ''}</span></div><div class="chips">${g.btn || ''}${del(g)}</div></div>`;
+    const full = (g) => row(g) + (linkDraft && linkDraft.id === g.key && !g.league ? leagueLinkRow(g) : '');
+    const block = (title, list) => (list.length ? `<button type="button" class="grp-toggle" data-a="games-toggle" data-v="${title}" aria-expanded="${!gamesShut.has(title)}"><span class="caret">${gamesShut.has(title) ? '▸' : '▾'}</span>${title} <span class="small muted">${list.length}</span></button>${gamesShut.has(title) ? '' : list.map(full).join('')}` : '');
+    return `<section class="panel"><h2>Games</h2>${block('In progress', live)}${block('Today', todays)}${block('Upcoming', upcoming)}${block('Finished', done) || (live.length || upcoming.length || todays.length ? '' : '<p class="muted">No games yet. Add one under Teams.</p>')}</section>`;
   }
-  const teamSeg = () => `<div>${seg('team-view', teamView === 'comps' ? 'roster' : teamView, [['roster', 'Roster'], ['lines', 'Lines'], ['coaches', 'Coaches']])}</div>`;
+  function scoreSheetView() {
+    const s = scoreEntry;
+    return `<div class="scrim" data-a="score-close" data-self="1"><div class="sheet score-sheet" role="dialog" aria-label="Enter the score"><h2>Final score</h2><p class="small muted">${esc(s.when || '')}</p>
+      <form data-form="final-score" class="final-form"><label class="field"><span class="label">${esc(s.names[0])}</span><input id="fs-a" type="number" min="0" max="99" inputmode="numeric" value="${s.a == null ? '' : s.a}" required></label><span class="dash">–</span><label class="field"><span class="label">${esc(s.names[1])}</span><input id="fs-b" type="number" min="0" max="99" inputmode="numeric" value="${s.b == null ? '' : s.b}" required></label>
+      <div class="chips"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-a="score-close">Cancel</button></div></form></div></div>`;
+  }
+  // A reported final on a team's own schedule, with no point-by-point record.
+  function reportFinal(t, x, us, them) {
+    const id = uid();
+    t.history.push({ id, opponent: x.opponent, date: new Date(`${x.date}T12:00:00`).getTime(), us, them, perPlayer: {}, points: [], reported: true, ...(x.competitionId ? { competitionId: x.competitionId, group: x.group } : {}) });
+    t.history.sort((p, q) => p.date - q.date);
+    Object.assign(x, { gameId: id, us, them });
+  }
+  const teamSeg = () => `<div>${seg('team-view', teamView === 'comps' ? 'roster' : teamView, [['roster', 'Roster'], ['lines', 'Lines'], ['coaches', 'Staff']])}</div>`;
   const myEmail = () => (CloudLink && CloudLink.user ? (CloudLink.user.email || '').toLowerCase() : '');
-  const isAdmin = () => !S.access || S.access.admin === myEmail();
+  const isAdmin = () => !S.access || S.access.admin === myEmail() || !!(CloudLink && CloudLink.god) || (S.staff || []).some((st) => st.email && st.email === myEmail() && (st.roles || [st.role]).includes('admin'));
   function coachesPanel() {
     if (!CloudLink) return '<section class="panel"><h2>Coaches</h2><p class="muted">Coaches are available in the Android app and on the desktop site, once you sign in.</p></section>';
     if (!CloudLink.user) return '<section class="panel"><h2>Coaches</h2><p>Sign in with Google to share this team with other coaches.</p><div><button type="button" class="btn small-btn primary" data-a="cloud-in">Sign in with Google</button></div></section>';
@@ -1054,6 +1179,47 @@ ${JSON.stringify(data)}`;
       ${admin ? `<form class="form-row" data-form="coach"><label class="field grow"><span class="label">Invite by Google email</span><input id="coach-email" type="email" autocomplete="off" required></label><button class="btn primary" type="submit">Invite</button></form>` : '<p class="small muted">Only the admin can invite or remove coaches.</p>'}
       ${coachNote ? `<p class="small" role="status">${esc(coachNote)}</p>` : ''}
     </section>`;
+  }
+
+  /* ---------- People: one record per person, whether or not they've signed in yet ---------- */
+  const people = () => Root.people || (Root.people = {});
+  function newPerson(f) { const per = { id: uid() + uid(), name: '', nickname: '', email: '', youth: false, guardians: [], uid: '', teamId: S.id, createdBy: myEmail() || '', at: Date.now(), ...f }; people()[per.id] = per; return per; }
+  const personByEmail = (email) => email && Object.values(people()).find((x) => x.email === email.toLowerCase());
+  function personFor(p) { let per = p.personId && people()[p.personId]; if (!per) { per = newPerson({ name: p.name, youth: !!(p.youth || S.youth) }); p.personId = per.id; } return per; }
+  // Keep a player's person record in step with the roster and the player's parent contacts.
+  function syncPerson(p) {
+    const per = personFor(p), guardians = [...new Set((p.contacts || []).filter((c) => /parent|guardian/i.test(c.relation || '')).map((c) => c.email.toLowerCase()))];
+    const want = { name: p.name, nickname: p.nick || '', youth: !!p.youth, guardians };
+    if (Object.keys(want).some((k) => JSON.stringify(per[k]) !== JSON.stringify(want[k]))) { Object.assign(per, want); per.at = Date.now(); }
+    guardians.forEach((e) => { if (!personByEmail(e)) newPerson({ email: e, role: 'parent', name: ((p.contacts || []).find((c) => c.email.toLowerCase() === e) || {}).name || e }); });
+  }
+  const STAFF_ROLES = [['admin', 'Team admin'], ['head', 'Head coach'], ['assistant', 'Assistant coach']];
+  const rolesOf = (st) => (st.roles && st.roles.length ? st.roles : st.role ? [st.role] : []);
+  const roleName = (k) => (STAFF_ROLES.find((r) => r[0] === k) || [0, 'Coach'])[1];
+  function staffPanel() {
+    const acc = S.access, admin = isAdmin(), staff = S.staff || [];
+    const status = (st) => { const per = st.personId && people()[st.personId]; return per && per.uid ? '<span class="small muted">Has an account</span>' : st.email ? '<span class="small muted">Invited, not signed in yet</span>' : '<span class="small muted">No email yet</span>'; };
+    return `<section class="panel"><h2>Staff</h2><p class="small muted">Admins, head coaches and assistants. Anyone with an email here can sign in with Google using it to open this team, see everything (ratings included) and record games.</p>
+      ${acc ? `<div class="sub-row"><span><strong>${esc(acc.admin)}</strong> <span class="tag-comp">Team admin</span> <span class="small muted">created the team</span></span></div>` : ''}
+      ${staff.map((st) => `<div class="sub-row"><span><strong>${esc(st.name || st.email)}</strong> ${rolesOf(st).map((k) => `<span class="tag-comp">${roleName(k)}</span>`).join(' ') || '<span class="tag-comp friendly">No role</span>'} ${st.email ? `<span class="small muted">${esc(st.email)}</span>` : ''} ${status(st)}</span>${admin ? `<span class="chips"><span class="seg" role="group">${STAFF_ROLES.map(([k, l]) => `<button type="button" data-a="staff-role" data-id="${st.id}" data-v="${k}" aria-pressed="${rolesOf(st).includes(k)}">${l.replace(' coach', '')}</button>`).join('')}</span>${twoTap('rmstaff-' + st.id, 'staff-remove', 'Remove', 'Tap again', 'danger', `data-id="${st.id}"`)}</span>` : ''}</div>`).join('')}
+      ${acc ? acc.coaches.filter((e) => e !== acc.admin && !staff.some((st) => st.email === e)).map((e) => `<div class="sub-row"><span><strong>${esc(e)}</strong> <span class="small muted">Has access</span></span>${admin ? twoTap('rmcoach-' + e, 'remove-coach', 'Remove', 'Tap again', 'danger', `data-v="${esc(e)}"`) : ''}</div>`).join('') : ''}
+      ${admin ? `<form class="form-row" data-form="staff"><label class="field grow"><span class="label">Name</span><input id="staff-name" type="text" autocomplete="off"></label><label class="field grow"><span class="label">Google email</span><input id="staff-email" type="email" autocomplete="off"></label><label class="field"><span class="label">Role</span><select id="staff-role">${STAFF_ROLES.map(([k, l]) => `<option value="${k}" ${k === 'head' ? 'selected' : ''}>${l}</option>`).join('')}</select></label><button class="btn primary" type="submit">Add</button></form>` : '<p class="small muted">Only the team admin can change staff.</p>'}
+      ${CloudLink && !CloudLink.user ? '<p class="small muted">Sign in so staff can open this team on their own devices.</p>' : ''}
+      ${coachNote ? `<p class="small" role="status">${esc(coachNote)}</p>` : ''}</section>`;
+  }
+  // Everything this account is, across teams and competitions.
+  function myRoles() {
+    const me = myEmail(); if (!me) return [];
+    const out = [];
+    comps().filter((c) => (c.admins || []).includes(me)).forEach((c) => out.push(['League admin', c.name]));
+    Root.teams.forEach((t) => {
+      if (t.access && t.access.admin === me) out.push(['Team admin', t.team]);
+      (t.staff || []).filter((st) => st.email === me).forEach((st) => rolesOf(st).forEach((k) => out.push([roleName(k), t.team])));
+      if (t.access && t.access.coaches.includes(me) && !(t.staff || []).some((st) => st.email === me) && t.access.admin !== me) out.push(['Coach', t.team]);
+      t.players.forEach((p) => { const per = p.personId && people()[p.personId]; if (per && per.email === me) out.push(['Player', t.team]); if (per && (per.guardians || []).includes(me)) out.push(['Parent', `${p.name} on ${t.team}`]); });
+    });
+    Object.values(people()).filter((x) => (x.guardians || []).includes(me) && !Root.teams.some((t) => t.players.some((p) => p.personId === x.id))).forEach((x) => out.push(['Parent', x.name]));
+    return out;
   }
 
   /* ---------- Saved lines ---------- */
@@ -1068,7 +1234,7 @@ ${JSON.stringify(data)}`;
   /* ---------- Competitions: league seasons and tournaments, run by their admins ---------- */
   const comps = () => Root.competitions || (Root.competitions = []);
   const myComps = () => comps().filter((c) => isCompAdmin(c) || teamInComp(c, S.id) || S.schedule.some((x) => x.competitionId === c.id));
-  const isCompAdmin = (c) => !!c && !c.readOnly && (!(c.admins || []).length || (!!myEmail() && c.admins.includes(myEmail())));
+  const isCompAdmin = (c) => !!c && (!!(CloudLink && CloudLink.god) || (!c.readOnly && (!(c.admins || []).length || (!!myEmail() && c.admins.includes(myEmail())))));
   const teamInComp = (c, id) => (c.groups || []).some((g) => (g.teams || []).some((t) => t.id === id));
   const groupOf = (c, id) => (c.groups || []).find((g) => (g.teams || []).some((t) => t.id === id));
   const fieldsOf = (c) => (c.sites || []).flatMap((s) => (s.fields || []).map((f) => ({ site: s, field: f, label: `${s.name} – ${f.name}` })));
@@ -1098,33 +1264,34 @@ ${JSON.stringify(data)}`;
   const ampm = (t) => { const n = HM(t), h = Math.floor(n / 60), m = n % 60; return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   // Open game slots: each field's hours, cut into game-length pieces.
-  function slotsOn(c, date) {
-    const len = c.slotMin || 90, wd = new Date(`${date}T12:00:00`).getDay(), out = [];
-    fieldsOf(c).forEach(({ site, field, label }) => (field.hours || []).forEach((w) => {
-      if (!w.days.includes(wd) || (w.from && date < w.from) || (w.to && date > w.to)) return;
-      for (let t = HM(w.start); t + len <= HM(w.end); t += len) out.push({ siteId: site.id, fieldId: field.id, label, start: hm(t) });
-    }));
-    return out;
+  // The open windows on one day, for each field.
+  function windowsOn(c, date) {
+    const wd = new Date(`${date}T12:00:00`).getDay();
+    return fieldsOf(c).map(({ site, field, label }) => ({ siteId: site.id, fieldId: field.id, label, wins: siteHours(site).filter((w) => w.days.includes(wd) && !(w.from && date < w.from) && !(w.to && date > w.to)).map((w) => [HM(w.start), HM(w.end)]) })).filter((f) => f.wins.length);
   }
   function slotDates(c) {
     const dates = new Set();
-    fieldsOf(c).forEach(({ field }) => (field.hours || []).forEach((w) => {
+    (c.sites || []).forEach((s) => siteHours(s).forEach((w) => {
       if (!w.from || !w.to) return;
       for (let d = new Date(`${w.from}T12:00:00`); localDay(d) <= w.to && dates.size < 400; d.setDate(d.getDate() + 1)) if (w.days.includes(d.getDay())) dates.add(localDay(d));
     }));
     (c.matchups || []).forEach((m) => { if (m.slot) dates.add(m.slot.date); });
     return [...dates].sort();
   }
+  const lenOf = (c, m) => m.len || c.slotMin || 90;
   // A team plays at one site per day, never twice at once, and a field holds one game at a time.
-  function slotProblem(c, mu, slot) {
-    const len = c.slotMin || 90, others = (c.matchups || []).filter((m) => m.id !== mu.id && m.slot && m.slot.date === slot.date);
+  function slotProblem(c, mu, slot, newLen) {
+    const len = newLen || lenOf(c, mu), others = (c.matchups || []).filter((m) => m.id !== mu.id && m.slot && m.slot.date === slot.date);
     const f = fieldById(c, slot.fieldId), site = f ? f.site.id : null;
-    if (others.some((m) => m.slot.fieldId === slot.fieldId && m.slot.start === slot.start)) return 'That slot is taken.';
-    for (const team of [mu.a, mu.b]) {
+    const s0 = HM(slot.start), overlaps = (m) => HM(m.slot.start) < s0 + len && s0 < HM(m.slot.start) + lenOf(c, m);
+    if (others.some((m) => m.slot.fieldId === slot.fieldId && overlaps(m))) return 'That field is busy then.';
+    const win = (windowsOn(c, slot.date).find((x) => x.fieldId === slot.fieldId) || { wins: [] }).wins.some(([s, e]) => HM(slot.start) >= s && HM(slot.start) + len <= e);
+    if (!win) return `A ${len}-minute game doesn't fit in the field's hours there.`;
+    for (const team of [mu.a, mu.b].filter((x) => !isTbd(x))) {
       for (const m of others.filter((o) => [o.a.id, o.b.id].includes(team.id))) {
         const of = fieldById(c, m.slot.fieldId);
         if (of && of.site.id !== site) return `${team.name} already plays at ${of.site.name} that day. A team stays at one site per day.`;
-        if (Math.abs(HM(m.slot.start) - HM(slot.start)) < len) return `${team.name} already has a game at ${ampm(m.slot.start)}.`;
+        if (overlaps(m)) return `${team.name} already has a game at ${ampm(m.slot.start)}.`;
       }
     }
     return '';
@@ -1132,11 +1299,11 @@ ${JSON.stringify(data)}`;
   // A scheduled matchup becomes a game on both teams' schedules.
   function fixtureOf(c, mu) {
     const f = mu.slot && fieldById(c, mu.slot.fieldId);
-    return { matchupId: mu.id, competitionId: c.id, group: mu.group || '', teams: [mu.a.id, mu.b.id], names: { [mu.a.id]: mu.a.name, [mu.b.id]: mu.b.name }, date: mu.slot ? mu.slot.date : '', time: mu.slot ? ampm(mu.slot.start) : '', location: f ? f.label : '', lat: f && f.field.lat != null ? f.field.lat : null, lng: f && f.field.lng != null ? f.field.lng : null, cancelled: !mu.slot, at: Date.now() };
+    return { ...(mu.result ? { final: { [mu.a.id]: mu.result.a, [mu.b.id]: mu.result.b } } : {}), matchupId: mu.id, competitionId: c.id, group: mu.group || '', teams: [mu.a.id, mu.b.id], names: { [mu.a.id]: mu.a.name, [mu.b.id]: mu.b.name }, date: mu.slot ? mu.slot.date : '', time: mu.slot ? ampm(mu.slot.start) : '', location: f ? f.label : '', lat: f && f.field.lat != null ? f.field.lat : null, lng: f && f.field.lng != null ? f.field.lng : null, cancelled: !mu.slot, at: Date.now() };
   }
   function applyFixtureLocal(fx, id) {
     Root.teams.forEach((t) => {
-      if (!fx.teams.includes(t.id)) return;
+      if (!fx.teams.includes(t.id)) { if (t.schedule.some((y) => y.fixtureId === id && !y.gameId)) t.schedule = t.schedule.filter((y) => !(y.fixtureId === id && !y.gameId)); return; }
       const other = fx.teams.find((x) => x !== t.id), x = t.schedule.find((y) => y.fixtureId === id);
       if (fx.cancelled) { if (x && !x.gameId) t.schedule = t.schedule.filter((y) => y !== x); return; }
       const want = { fixtureId: id, kind: 'game', oppTeamId: other, opponent: fx.names[other] || 'Opponent', date: fx.date, time: fx.time, location: fx.location, competitionId: fx.competitionId, group: fx.group, lat: fx.lat, lng: fx.lng, fixtureAt: fx.at };
@@ -1149,12 +1316,35 @@ ${JSON.stringify(data)}`;
     if (CloudLink && CloudLink.user) CloudLink.leagueFixture(mu.id, fx);
   }
 
-  function placeMatchup(id, fieldId, start) {
+  function placeMatchup(id, fieldId, start, len) {
     const c = compOf(compView), m = (c.matchups || []).find((x) => x.id === id), slot = { fieldId, date: schedDate, start };
     if (!m) return;
-    const why = slotProblem(c, m, slot);
-    if (why) { flash(why); return; }
-    commit(() => { m.slot = slot; touchComp(c); publishMatchup(c, m); muSel = null; });
+    const why = slotProblem(c, m, slot, len);
+    if (why) { flash(why); render(); return; }
+    commit(() => { m.slot = slot; if (len) m.len = len; touchComp(c); publishMatchup(c, m); muSel = null; });
+  }
+  // Why a matchup can't be played at this site today, if it can't.
+  function siteConflict(c, m) {
+    const sitesFor = (id) => new Set((c.matchups || []).filter((x) => x.id !== m.id && x.slot && x.slot.date === schedDate && (x.a.id === id || x.b.id === id)).map((x) => (fieldById(c, x.slot.fieldId) || { site: {} }).site.id));
+    const sa = sitesFor(m.a.id), sb = sitesFor(m.b.id), all = new Set([...sa, ...sb]);
+    if (schedSite !== 'all') { const away = [...all].find((s) => s !== schedSite); if (away) { const s = (c.sites || []).find((x) => x.id === away); return `${sa.has(away) ? m.a.name : m.b.name} plays at ${s ? s.name : 'another site'} that day`; } return ''; }
+    return all.size > 1 ? 'These teams are already at different sites that day' : '';
+  }
+  // Make every team's schedule and the shared game records match the competitions as they are now.
+  function reconcile() {
+    let removed = 0, fixed = 0;
+    comps().filter(isCompAdmin).forEach((c) => {
+      const live = new Map((c.matchups || []).filter((m) => m.slot).map((m) => [m.id, m]));
+      Root.teams.forEach((t) => {
+        const before = t.schedule.length;
+        t.schedule = t.schedule.filter((x) => x.gameId || x.competitionId !== c.id || !x.fixtureId || live.has(x.fixtureId));
+        removed += before - t.schedule.length;
+      });
+      (c.matchups || []).forEach((m) => { publishMatchup(c, m); fixed++; });
+      if (CloudLink && CloudLink.user) CloudLink.reconcileFixtures(c.id, [...live.keys()]);
+    });
+    Root.teams.forEach((t) => t.schedule.forEach((x) => { if (x.competitionId && !compOf(x.competitionId) && !x.fixtureId) { delete x.competitionId; delete x.group; } }));
+    return { removed, fixed };
   }
   function competitionsScreen() {
     const c = compView && compOf(compView);
@@ -1169,16 +1359,63 @@ ${JSON.stringify(data)}`;
         <p class="small muted">You become its admin and can add other admins by email.</p></section>`;
     }
     const admin = isCompAdmin(c), groupWord = c.kind === 'tournament' ? 'Pool' : 'Division';
-    const subs = [['overview', 'Overview'], ['divisions', `${groupWord}s`], ['rules', 'Rules'], ['fields', 'Fields'], ['matchups', 'Matchups'], ['schedule', 'Schedule']];
+    const subs = [['overview', 'Overview'], ['standings', 'Standings'], ['leaders', 'Leaders'], ['divisions', `${groupWord}s`], ['rules', 'Rules'], ['fields', 'Fields'], ['matchups', 'Matchups'], ['schedule', 'Schedule'], ['playoffs', 'Playoffs']];
     let body = '';
     if (compSub === 'overview') body = compOverview(c, admin);
     else if (compSub === 'divisions') body = compDivisions(c, admin, groupWord);
     else if (compSub === 'rules') body = admin ? `<p class="small muted">Defaults for every game in ${esc(c.name)}. Captains can still agree to changes for one game when they start it.</p>${gameRulesBody(true)}` : compRulesSummary(c);
     else if (compSub === 'fields') body = compFields(c, admin);
     else if (compSub === 'matchups') body = compMatchups(c, admin, groupWord);
+    else if (compSub === 'standings') body = compStandings(c);
+    else if (compSub === 'leaders') body = compLeaders(c);
+    else if (compSub === 'playoffs') body = compPlayoffs(c, admin);
     else body = compSchedule(c, admin);
     return `<section class="panel"><div class="panel-head"><button type="button" class="btn small-btn back" data-a="comp-close" aria-label="Back">←</button><h2>${esc(c.name)}</h2><span class="small muted">${c.kind === 'tournament' ? 'Tournament' : 'League season'}${admin ? '' : ' · view only'}</span></div>
       <div class="comp-tabs">${seg('comp-sub', compSub, subs)}</div>${body}</section>`;
+  }
+  // Every result: scores entered on matchups, or finals of games our own teams tracked.
+  function compResults(c) {
+    return (c.matchups || []).map((m) => {
+      let r = m.result;
+      if (!r) { const t = Root.teams.find((x) => x.id === m.a.id || x.id === m.b.id), x = t && t.schedule.find((y) => y.fixtureId === m.id && y.gameId); if (x) r = t.id === m.a.id ? { a: x.us, b: x.them } : { a: x.them, b: x.us }; }
+      return r ? { a: m.a.id, b: m.b.id, sa: Number(r.a), sb: Number(r.b), group: m.group, playoff: !!m.playoff } : null;
+    }).filter(Boolean);
+  }
+  function compStandings(c) {
+    const res = compResults(c).filter((r) => !r.playoff), groups = (c.groups || []).length ? c.groups : [{ name: c.name, teams: [] }];
+    const nameOf = (id) => { for (const g of c.groups || []) { const t = (g.teams || []).find((x) => x.id === id); if (t) return t.name; } return id; };
+    const pct = (x) => (x.gp ? x.pct.toFixed(3).replace(/^0/, '') : '–');
+    return groups.map((g, gi) => {
+      const ids = (g.teams || []).map((t) => t.id), rows = Report.standings(ids, res.filter((r) => ids.includes(r.a) && ids.includes(r.b)));
+      return `<h3>${esc(g.name)}</h3><div class="tbl-wrap"><table class="bx bx-box standings" data-sort-id="stand-${c.id}-${gi}"><thead><tr><th class="bx-no">#</th><th class="bx-name">Team</th><th>W-L${rows.some((x) => x.t) ? '-T' : ''}</th><th>Win %</th><th>Goals scored</th><th>Goals against</th><th>+/–</th></tr></thead><tbody>
+        ${rows.map((x, i) => `<tr><td class="bx-no" data-v="${i + 1}">${i + 1}</td><td class="bx-name">${esc(nameOf(x.id))}</td><td data-v="${x.pct}">${x.w}-${x.l}${rows.some((y) => y.t) ? '-' + x.t : ''}</td><td data-v="${x.pct}">${pct(x)}</td><td>${x.gf}</td><td>${x.ga}</td><td data-v="${x.diff}">${x.diff > 0 ? '+' : ''}${x.diff}</td></tr>`).join('') || '<tr><td colspan="7">No teams yet.</td></tr>'}</tbody></table></div>`;
+    }).join('') + '<p class="small muted">Playoff games are left out. Ranked by win %. Ties: head-to-head between two teams; in bigger ties, a team that beat all the others goes first, then +/–, total wins, and goals scored. Tap a column to sort by it.</p>';
+  }
+  // Player leaders, from games tracked point by point in this app.
+  function compLeaders(c) {
+    const totals = new Map();
+    const take = (t, points) => {
+      const tot = Report.totals(points);
+      tot.forEach((v, pid) => {
+        const p = t.players.find((x) => x.id === pid); if (!p) return;
+        const key = p.personId || `${t.id}:${pid}`, cur = totals.get(key) || { name: p.name, team: t.team, played: 0, plus: 0, touch: 0, comp: 0, rec: 0, goal: 0, assist: 0, block: 0 };
+        const s = Report.playerSummary(points, pid);
+        ['played', 'touch', 'comp', 'rec', 'goal', 'assist', 'block'].forEach((k) => { cur[k] += v[k] || 0; });
+        cur.plus += s.plus - s.minus;
+        totals.set(key, cur);
+      });
+    };
+    Root.teams.forEach((t) => {
+      t.history.filter((h) => h.competitionId === c.id && (h.points || []).length).forEach((h) => take(t, h.points));
+      if (t.game && t.game.competitionId === c.id) take(t, t.game.points);
+    });
+    const COLS = [['played', 'Points played'], ['plus', '+/–'], ['touch', 'Touches'], ['comp', 'Completions'], ['rec', 'Catches'], ['goal', 'Goals'], ['assist', 'Assists'], ['block', "D's"]];
+    const top = [...totals.values()].sort((x, y) => y[rankBy] - x[rankBy] || y.plus - x.plus || x.name.localeCompare(y.name)).slice(0, 10);
+    if (!totals.size) return '<p class="muted">No player stats yet. Leaders come from games in this competition that were tracked point by point in the app.</p>';
+    return `<div class="field"><span class="label">Top 10 by</span>${seg('rank-by', rankBy, COLS.map(([k, l]) => [k, l]))}</div>
+      <div class="tbl-wrap"><table class="bx bx-box" data-sort-id="lead-${c.id}-${rankBy}"><thead><tr><th class="bx-no">#</th><th class="bx-name">Player</th>${COLS.map(([, l]) => `<th>${l}</th>`).join('')}</tr></thead><tbody>
+        ${top.map((x, i) => `<tr><td class="bx-no">${i + 1}</td><td class="bx-name">${esc(x.name)} <span class="small muted">${esc(x.team)}</span></td>${COLS.map(([k]) => `<td>${k === 'plus' && x[k] > 0 ? '+' : ''}${x[k]}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="small muted">Only games tracked point by point in this app count, including other coaches' games once they're shared with you.</p>`;
   }
   function compRulesSummary(c) {
     const r = { ...S.rules, ...(c.rules || {}) };
@@ -1204,17 +1441,24 @@ ${JSON.stringify(data)}`;
       <p class="small muted">Teams on the app show up as you type. A team that isn't on the app can be added by name.</p>`;
   }
   function compFields(c, admin) {
-    const hoursRow = (s, f, w, wi) => `<span class="chip">${w.days.map((d) => DAYS[d]).join(', ')} ${ampm(w.start)}–${ampm(w.end)}${w.from ? ` · ${esc(longDate(w.from))}–${esc(longDate(w.to))}` : ''}${admin ? `<button type="button" data-a="hours-rm" data-s="${s.id}" data-f="${f.id}" data-i="${wi}" aria-label="Remove these hours">✕</button>` : ''}</span>`;
-    const fieldRow = (s, f) => `<div class="fld"><div class="panel-head"><strong>${esc(f.name)}</strong><span class="small muted">${f.lat != null ? `<a href="https://www.google.com/maps/search/?api=1&query=${f.lat},${f.lng}" target="_blank" rel="noopener">${f.address ? esc(f.address) : `${f.lat.toFixed(5)}, ${f.lng.toFixed(5)}`}</a>` : 'No location yet'}</span>
-        <span class="right">${admin ? `<button type="button" class="btn small-btn" data-a="field-map" data-s="${s.id}" data-f="${f.id}">${f.lat != null ? 'Move pin' : 'Set location'}</button>${twoTap('delfld-' + f.id, 'field-del', 'Remove', 'Tap again', 'danger', `data-s="${s.id}" data-f="${f.id}"`)}` : ''}</span></div>
-        ${fieldEdit && fieldEdit.f === f.id ? mapEditor(f) : ''}
-        <div class="taglist">${(f.hours || []).map((w, wi) => hoursRow(s, f, w, wi)).join('') || '<span class="small muted">No schedulable hours yet.</span>'}</div>
-        ${admin ? `<form class="hours-form" data-form="hours" data-s="${s.id}" data-f="${f.id}"><div class="days">${DAYS.map((d, i) => `<label><input type="checkbox" name="d${i}" ${i === 6 ? 'checked' : ''}> ${d}</label>`).join('')}</div>
-          <div class="form-row"><label class="field"><span class="label">From</span><input type="time" name="start" value="09:00" required></label><label class="field"><span class="label">To</span><input type="time" name="end" value="17:00" required></label><label class="field"><span class="label">First date</span><input type="date" name="from" required></label><label class="field"><span class="label">Last date</span><input type="date" name="to" required></label><button class="btn" type="submit">Add hours</button></div></form>` : ''}</div>`;
-    return `${(c.sites || []).map((s) => `<div class="site"><div class="panel-head"><h3>${esc(s.name)}</h3>${s.address ? `<span class="small muted">${esc(s.address)}</span>` : ''}${admin ? `<span class="right">${twoTap('delsite-' + s.id, 'site-del', 'Remove site', 'Tap again', 'danger', `data-s="${s.id}"`)}</span>` : ''}</div>
-        ${(s.fields || []).map((f) => fieldRow(s, f)).join('') || '<p class="small muted">No fields at this site yet.</p>'}
-        ${admin ? `<form class="form-row" data-form="field" data-s="${s.id}"><label class="field grow"><span class="label">New field at ${esc(s.name)}</span><input name="name" type="text" placeholder="East field" autocomplete="off" required></label><button class="btn" type="submit">Add field</button></form>` : ''}</div>`).join('') || '<p class="muted">No sites yet.</p>'}
-      ${admin ? '<form class="form-row" data-form="site"><label class="field grow"><span class="label">New site or complex</span><input name="name" type="text" placeholder="Franklin High School" autocomplete="off" required></label><button class="btn primary" type="submit">Add site</button></form>' : ''}`;
+    const hoursRow = (s, w, wi) => `<span class="chip">${w.days.map((d) => DAYS[d]).join(', ')} ${ampm(w.start)}–${ampm(w.end)}${w.from ? ` · ${esc(longDate(w.from))}–${esc(longDate(w.to))}` : ''}${admin ? `<button type="button" data-a="hours-rm" data-s="${s.id}" data-i="${wi}" aria-label="Remove these hours">✕</button>` : ''}</span>`;
+    const hoursForm = (s) => `<form class="hours-form" data-form="hours" data-s="${s.id}"><div class="days">${DAYS.map((d, i) => `<label><input type="checkbox" name="d${i}" ${i === 6 ? 'checked' : ''}> ${d}</label>`).join('')}</div>
+      <div class="form-row"><label class="field"><span class="label">From</span><input type="time" name="start" value="09:00" required></label><label class="field"><span class="label">To</span><input type="time" name="end" value="17:00" required></label><label class="field"><span class="label">First date</span><input type="date" name="from" required></label><label class="field"><span class="label">Last date</span><input type="date" name="to" required></label><button class="btn" type="submit">Add hours</button></div></form>`;
+    return `${(c.sites || []).map((s) => `<div class="site ${siteShut.has(s.id) ? 'shut' : ''}"><div class="panel-head site-head"><button type="button" class="site-toggle" data-a="site-toggle" data-s="${s.id}" aria-expanded="${!siteShut.has(s.id)}"><span class="caret">${siteShut.has(s.id) ? '▸' : '▾'}</span><h3>${esc(s.name)}</h3><span class="small muted">${(s.fields || []).length} ${(s.fields || []).length === 1 ? 'field' : 'fields'} · ${siteHours(s).length ? `${siteHours(s).length} sets of hours` : 'no hours yet'}</span></button>${admin ? `<span class="right">${twoTap('delsite-' + s.id, 'site-del', 'Remove site', 'Tap again', 'danger', `data-s="${s.id}"`)}</span>` : ''}</div>
+        ${siteShut.has(s.id) ? '' : `<div class="site-body">
+        <div class="taglist">${(s.fields || []).map((f) => `<span class="chip">${esc(f.name)}${admin ? twoTapX(f.id, s.id) : ''}</span>`).join('') || '<span class="small muted">No fields yet.</span>'}</div>
+        ${admin ? `<form class="form-row" data-form="field" data-s="${s.id}"><label class="field grow"><span class="label">Add fields at ${esc(s.name)} (separate with commas)</span><input name="name" type="text" placeholder="East, West, Stadium" autocomplete="off" required></label><button class="btn" type="submit">Add</button></form>` : ''}
+        <div class="label">Schedulable hours (all fields at this site)</div>
+        <div class="taglist">${siteHours(s).map((w, wi) => hoursRow(s, w, wi)).join('') || '<span class="small muted">No hours yet.</span>'}</div>
+        ${admin ? hoursForm(s) : ''}</div>`}</div>`).join('') || '<p class="muted">No sites yet.</p>'}
+      ${admin ? '</section><section class="panel"><h2>New site or complex</h2><form class="form-row" data-form="site"><label class="field grow"><span class="label">Name</span><input name="name" type="text" placeholder="Franklin High School" autocomplete="off" required></label><button class="btn primary" type="submit">Add site</button></form><p class="small muted">Add the fields at it and its hours after.</p>' : ''}`;
+  }
+  const twoTapX = (fid, sid) => `<button type="button" data-a="confirm" data-key="delfld-${fid}" data-then="field-del" data-s="${sid}" data-f="${fid}" aria-label="Remove field">${confirmKey === 'delfld-' + fid ? 'Tap again' : '✕'}</button>`;
+  // Hours are set per site; older data kept them per field.
+  function siteHours(s) {
+    if (s.hours && s.hours.length) return s.hours;
+    const seen = new Set();
+    return (s.fields || []).flatMap((f) => f.hours || []).filter((w) => { const k = JSON.stringify(w); if (seen.has(k)) return false; seen.add(k); return true; });
   }
   function mapEditor(f) {
     return `<div class="map-box"><div class="map-search"><input id="map-search" type="search" placeholder="Search for a place or address" autocomplete="off"><div id="map-results"></div></div>
@@ -1224,28 +1468,207 @@ ${JSON.stringify(data)}`;
       <div class="chips"><button type="button" class="btn primary" data-a="field-map-save">Save location</button><button type="button" class="btn" data-a="field-map-close">Cancel</button></div></div>`;
   }
   function compMatchups(c, admin, word) {
-    const where = (m) => { if (!m.slot) return '<span class="small muted">Not scheduled</span>'; const f = fieldById(c, m.slot.fieldId); return `<span class="small">${esc(longDate(m.slot.date))} · ${ampm(m.slot.start)}${f ? ' · ' + esc(f.label) : ''}</span>`; };
+    const where = (m) => { if (!m.slot) return m.linked ? `<span class="small">${esc(longDate(m.date))} · linked game</span>` : '<span class="small muted">Not scheduled</span>'; const f = fieldById(c, m.slot.fieldId); return `<span class="small">${esc(longDate(m.slot.date))} · ${ampm(m.slot.start)}${f ? ' · ' + esc(f.label) : ''}</span>`; };
+    const row = (m) => `<div class="sub-row"><span>${m.label ? `<span class="tag-comp">${esc(m.label)}</span> ` : ''}<strong>${esc(m.a.name)}</strong> vs <strong>${esc(m.b.name)}</strong>${m.result ? ` <b>${m.result.a}–${m.result.b}</b>` : ''} ${where(m)}${!admin && m.playoff ? ' <span class="tag-comp">Playoff</span>' : ''}</span>${admin ? `<span class="chips"><label class="check small"><input type="checkbox" data-c="mu-playoff" data-id="${m.id}" ${m.playoff ? 'checked' : ''} ${m.bracketId ? 'disabled' : ''}> Playoff</label>${twoTap('mudel-' + m.id, 'mu-del', 'Remove', 'Tap again', 'danger', `data-id="${m.id}"`)}</span>` : ''}</div>`;
     return `${(c.groups || []).map((g, gi) => {
-      const list = (c.matchups || []).filter((m) => m.group === g.name), teams = g.teams || [];
-      return `<div class="line-edit"><div class="panel-head"><strong>${esc(g.name)}</strong><span class="small muted">${list.length} matchups</span>${admin && teams.length > 1 ? `<span class="right"><button type="button" class="btn small-btn" data-a="round-robin" data-i="${gi}">Round robin</button></span>` : ''}</div>
-        ${list.map((m) => `<div class="sub-row"><span><strong>${esc(m.a.name)}</strong> vs <strong>${esc(m.b.name)}</strong> ${where(m)}</span>${admin ? `<button type="button" class="btn small-btn danger" data-a="mu-del" data-id="${m.id}">Remove</button>` : ''}</div>`).join('') || '<p class="small muted">No matchups yet.</p>'}
-        ${admin && teams.length > 1 ? `<form class="form-row" data-form="matchup" data-i="${gi}"><label class="field"><span class="label">Team</span><select name="a">${teams.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join('')}</select></label><label class="field"><span class="label">vs</span><select name="b">${teams.map((t, i) => `<option value="${i}" ${i === 1 ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label><button class="btn" type="submit">Add matchup</button></form>` : ''}</div>`;
-    }).join('') || `<p class="muted">Add ${word.toLowerCase()}s and teams first.</p>`}`;
-  }
-  function compSchedule(c, admin) {
-    const dates = slotDates(c);
-    if (!fieldsOf(c).some((f) => (f.field.hours || []).length)) return '<p class="muted">Add fields and their schedulable hours first (Fields tab).</p>';
-    if (!dates.includes(schedDate)) schedDate = dates.find((d) => d >= localDay()) || dates[0];
-    const slots = slotsOn(c, schedDate), fields = [...new Map(slots.map((s) => [s.fieldId, s.label])).entries()], times = [...new Set(slots.map((s) => s.start))].sort();
-    const at = (fid, t) => (c.matchups || []).find((m) => m.slot && m.slot.date === schedDate && m.slot.fieldId === fid && m.slot.start === t);
-    const open = (c.matchups || []).filter((m) => !m.slot);
-    const chip = (m, placed) => `<span class="mu ${muSel === m.id ? 'sel' : ''}" ${admin ? `data-a="mu-pick" data-id="${m.id}" data-drag="mu:${m.id}"` : ''} title="${esc(m.group)}"><b>${esc(m.a.name)}</b> v <b>${esc(m.b.name)}</b>${placed && admin ? `<button type="button" data-a="mu-unslot" data-id="${m.id}" aria-label="Unschedule">✕</button>` : ''}</span>`;
-    return `<div class="form-row"><label class="field"><span class="label">Day</span><select data-c="sched-date">${dates.map((d) => `<option value="${d}" ${d === schedDate ? 'selected' : ''}>${esc(longDate(d))}${(c.matchups || []).some((m) => m.slot && m.slot.date === d) ? ' •' : ''}</option>`).join('')}</select></label><span class="small muted">${open.length} matchups to schedule. ${admin ? 'Drag one onto an open slot, or tap it and then tap the slot.' : ''}</span></div>
-      ${admin ? `<div class="mu-tray" data-drop="mu-tray">${open.map((m) => chip(m)).join('') || '<span class="small muted">Everything is scheduled.</span>'}</div>` : ''}
-      ${slots.length ? `<div class="tbl-wrap"><table class="sched"><thead><tr><th></th>${fields.map(([, l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>${times.map((t) => `<tr><th>${ampm(t)}</th>${fields.map(([fid]) => { const has = slots.some((s) => s.fieldId === fid && s.start === t), m = at(fid, t); return has ? `<td class="slot ${m ? 'full' : ''}" ${admin && !m ? `data-a="slot-pick" data-drop="slot:${fid}|${t}" data-f="${fid}" data-t="${t}"` : ''}>${m ? chip(m, true) : ''}</td>` : '<td class="noslot"></td>'; }).join('')}</tr>`).join('')}</tbody></table></div>` : '<p class="muted">No open hours on this day.</p>'}
-      <p class="small muted">A team can play more than one game a day, but only at one site.</p>`;
+      const list = (c.matchups || []).filter((m) => m.group === g.name), teams = g.teams || [], key = `${c.id}:${g.name}`, shut = muShut.has(key);
+      return `<div class="line-edit"><div class="panel-head site-head"><button type="button" class="site-toggle" data-a="mu-toggle" data-v="${esc(key)}" aria-expanded="${!shut}"><span class="caret">${shut ? '▸' : '▾'}</span><strong>${esc(g.name)}</strong><span class="small muted">${list.length} matchups${list.some((m) => m.playoff) ? ` · ${list.filter((m) => m.playoff).length} playoff` : ''}</span></button>${admin && teams.length > 1 && !shut ? `<span class="right"><button type="button" class="btn small-btn" data-a="round-robin" data-i="${gi}">Round robin</button></span>` : ''}</div>
+        ${shut ? '' : `${list.map(row).join('') || '<p class="small muted">No matchups yet.</p>'}
+        ${admin && teams.length > 1 ? `<form class="form-row" data-form="matchup" data-i="${gi}"><label class="field"><span class="label">Team</span><select name="a">${teams.map((t, i) => `<option value="${i}">${esc(t.name)}</option>`).join('')}</select></label><label class="field"><span class="label">vs</span><select name="b">${teams.map((t, i) => `<option value="${i}" ${i === 1 ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label><label class="check"><input type="checkbox" name="playoff"> Playoff</label><button class="btn" type="submit">Add matchup</button></form>` : ''}`}</div>`;
+    }).join('') || `<p class="muted">Add ${word.toLowerCase()}s and teams first.</p>`}
+      <p class="small muted">Playoff games don't count in the standings. Bracket games are set up on the Playoffs tab.</p>`;
   }
 
+  /* ---------- Playoffs: brackets whose games fill in as results come in ---------- */
+  const gameLabel = (c, id) => { const m = (c.matchups || []).find((x) => x.id === id); return m ? m.label || 'a game' : 'a game'; };
+  const tbd = (id, name) => ({ id: `tbd:${id}`, name });
+  const isTbd = (t) => !t || String(t.id).startsWith('tbd:');
+  function srcText(c, s) {
+    if (!s) return 'TBD';
+    if (s.seed) { const br = (c.brackets || []).find((b) => b.id === s.bracket); return `${br && (c.brackets || []).length > 1 ? br.name + ' ' : ''}Seed #${s.seed}`; }
+    if (s.winner) return `Winner of ${gameLabel(c, s.winner)}`;
+    if (s.loser) return `Loser of ${gameLabel(c, s.loser)}`;
+    return s.team ? s.team.name : 'TBD';
+  }
+  // Who a source points to right now: a seeded team, a known winner or loser, or a name for the empty spot.
+  function resolveSrc(c, s) {
+    if (!s) return tbd('x', 'TBD');
+    if (s.team) return { ...s.team };
+    if (s.seed) { const br = (c.brackets || []).find((b) => b.id === s.bracket), t = br && br.seeds[s.seed - 1]; return t ? { ...t } : tbd(`${s.bracket}:s${s.seed}`, srcText(c, s)); }
+    const g = (c.matchups || []).find((m) => m.id === (s.winner || s.loser));
+    if (g && g.result && Number(g.result.a) !== Number(g.result.b) && !isTbd(g.a) && !isTbd(g.b)) {
+      const aWon = Number(g.result.a) > Number(g.result.b), pick = s.winner ? (aWon ? g.a : g.b) : (aWon ? g.b : g.a);
+      return { ...pick };
+    }
+    return tbd(`${s.winner ? 'w' : 'l'}:${g ? g.id : 'x'}`, srcText(c, s));
+  }
+  function resolvePlayoffs(c) {
+    for (let pass = 0; pass < 8; pass++) {
+      let moved = false;
+      (c.matchups || []).filter((m) => m.src).forEach((m) => {
+        const a = resolveSrc(c, m.src.a), b = resolveSrc(c, m.src.b);
+        if (a.id === m.a.id && a.name === m.a.name && b.id === m.b.id && b.name === m.b.name) return;
+        if (m.result && (a.id !== m.a.id || b.id !== m.b.id)) delete m.result;
+        m.a = a; m.b = b; moved = true;
+        if (m.slot) publishMatchup(c, m);
+      });
+      if (!moved) break;
+    }
+  }
+  function addPlayoffGame(c, br, round, a, b) {
+    c.playoffSeq = (c.playoffSeq || 0) + 1;
+    const m = { id: uid(), playoff: true, bracketId: br ? br.id : null, round, label: `G${c.playoffSeq}`, src: { a, b }, group: br ? br.group || '' : '', a: tbd('x', 'TBD'), b: tbd('x', 'TBD'), slot: null };
+    c.matchups = c.matchups || []; c.matchups.push(m);
+    return m;
+  }
+  // Standard seeding: 1 plays the lowest seed, and the top seeds get the byes.
+  function seedOrder(p) { let o = [1]; while (o.length < p) { const n = o.length * 2; o = o.flatMap((s) => [s, n + 1 - s]); } return o; }
+  function makeBracket(c, name, group, n, entrants) {
+    const br = { id: uid(), name, group: group || '', size: n, seeds: Array(n).fill(null) };
+    c.brackets = c.brackets || []; c.brackets.push(br);
+    const src = (k) => (entrants ? entrants[k - 1] : { bracket: br.id, seed: k });
+    let p = 1; while (p < n) p *= 2;
+    const order = seedOrder(p);
+    let next = [], round = 1;
+    for (let i = 0; i < order.length; i += 2) {
+      const x = order[i] <= n ? src(order[i]) : null, y = order[i + 1] <= n ? src(order[i + 1]) : null;
+      if (x && y) next.push({ winner: addPlayoffGame(c, br, round, x, y).id }); else next.push(x || y);
+    }
+    while (next.length > 1) {
+      round += 1;
+      const now = next; next = [];
+      for (let i = 0; i < now.length; i += 2) next.push({ winner: addPlayoffGame(c, br, round, now[i], now[i + 1]).id });
+    }
+    br.rounds = round;
+    resolvePlayoffs(c);
+    return br;
+  }
+  const roundName = (br, r) => { if (r % 1) return '3rd place'; const left = br.rounds - r; return left === 0 ? 'Final' : left === 1 ? 'Semifinals' : left === 2 ? 'Quarterfinals' : `Round ${r}`; };
+  function compPlayoffs(c, admin) {
+    const groups = c.groups || [], word = c.kind === 'tournament' ? 'pool' : 'division';
+    if (playDiv !== 'all' && !groups.some((g) => g.name === playDiv)) playDiv = 'all';
+    const brackets = (c.brackets || []).filter((b) => playDiv === 'all' || b.group === playDiv);
+    const teamsFor = (br) => (br.group ? (groups.find((g) => g.name === br.group) || { teams: [] }).teams : groups.flatMap((g) => g.teams || []));
+    const gameCard = (m) => {
+      const f = m.slot && fieldById(c, m.slot.fieldId), ready = !isTbd(m.a) && !isTbd(m.b);
+      const aWon = m.result && Number(m.result.a) > Number(m.result.b);
+      return `<div class="bk-game" id="bk-${m.id}"><div class="bk-head">${admin && bkRename === m.id ? `<input type="text" class="bk-label" data-c="bk-label" data-id="${m.id}" value="${esc(m.label)}" aria-label="Game name" autocomplete="off">` : admin ? `<button type="button" class="linkish bk-name" data-a="bk-rename" data-id="${m.id}" title="Rename this game"><b>${esc(m.label)}</b></button>` : `<b>${esc(m.label)}</b>`}<span class="small muted">${m.slot ? `${esc(longDate(m.slot.date))} · ${ampm(m.slot.start)}${f ? ' · ' + esc(f.label) : ''}` : 'Not scheduled'}</span></div>
+        <div class="bk-side ${m.result && aWon ? 'won' : ''}"><span>${m.src && m.src.a && m.src.a.seed ? `<span class="seed">${m.src.a.seed}</span>` : ''}${esc(m.a.name)}</span>${m.result ? `<b>${m.result.a}</b>` : ''}</div>
+        <div class="bk-side ${m.result && !aWon ? 'won' : ''}"><span>${m.src && m.src.b && m.src.b.seed ? `<span class="seed">${m.src.b.seed}</span>` : ''}${esc(m.b.name)}</span>${m.result ? `<b>${m.result.b}</b>` : ''}</div>
+        ${admin ? `<div class="chips">${ready ? `<button type="button" class="btn small-btn ${m.result ? '' : 'primary'}" data-a="score-open" data-comp="${c.id}" data-id="${m.id}">${m.result ? 'Edit score' : 'Enter score'}</button>` : ''}${m.src ? `<button type="button" class="btn small-btn" data-a="bk-edit" data-id="${m.id}">${bkEdit === m.id ? 'Done' : 'Change teams'}</button>` : ''}${twoTap('mudel-' + m.id, 'mu-del', 'Remove', 'Tap again', 'danger', `data-id="${m.id}"`)}</div>
+        ${bkEdit === m.id && m.src ? `<div class="form-row">${['a', 'b'].map((k) => `<label class="field grow"><span class="label">${k === 'a' ? 'Top' : 'Bottom'}</span><select data-c="po-src" data-id="${m.id}" data-k="${k}">${sources(srcKey(m.src[k]), m.id)}</select></label>`).join('')}</div>` : ''}` : ''}</div>`;
+    };
+    const seedsEditor = (br) => {
+      const teams = teamsFor(br), entrantsFixed = !(c.matchups || []).some((m) => m.bracketId === br.id && m.src && [m.src.a, m.src.b].some((s) => s && s.seed && s.bracket === br.id));
+      if (entrantsFixed) return '<p class="small muted">Entrants come from other games.</p>';
+      return `<div class="seeds">${br.seeds.map((t, i) => `<label class="seed-pick"><span class="seed">${i + 1}</span><select data-c="seed" data-b="${br.id}" data-i="${i}" ${admin ? '' : 'disabled'}><option value="">Seed #${i + 1}</option>${teams.map((x) => `<option value="${esc(x.id)}" ${t && t.id === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`).join('')}</div>
+        ${admin ? `<div class="chips"><button type="button" class="btn small-btn" data-a="seed-standings" data-b="${br.id}">Seed from standings</button></div>` : ''}`;
+    };
+    const bracketView = (br) => {
+      const games = (c.matchups || []).filter((m) => m.bracketId === br.id), rounds = [...new Set(games.map((m) => m.round))].sort((x, y) => (x % 1 ? x + 1 : x) - (y % 1 ? y + 1 : y));
+      return `<div class="bracket"><div class="panel-head"><h3>${esc(br.name)}</h3><span class="small muted">${br.size} teams${br.group ? ' · ' + esc(br.group) : ''}</span>${admin ? `<span class="right">${br.rounds > 1 && !games.some((m) => m.round % 1) ? `<button type="button" class="btn small-btn" data-a="bk-third" data-b="${br.id}">Add 3rd-place game</button>` : ''}${games.filter((m) => m.round === 1).length > 1 ? `<button type="button" class="btn small-btn" data-a="bk-consol" data-b="${br.id}">Add consolation bracket</button>` : ''}${twoTap('delbk-' + br.id, 'bk-del', 'Delete bracket', 'Tap again: deletes its games', 'danger', `data-b="${br.id}"`)}</span>` : ''}</div>
+        ${seedsEditor(br)}
+        <div class="bk-rounds">${rounds.map((r) => `<div class="bk-round"><div class="label">${roundName(br, r)}</div>${games.filter((m) => m.round === r).map(gameCard).join('')}</div>`).join('')}</div></div>`;
+    };
+    const extra = (c.matchups || []).filter((m) => m.src && !m.bracketId && (playDiv === 'all' || m.group === playDiv));
+    const sources = (sel, skip) => {
+      const opts = [];
+      (c.brackets || []).forEach((b) => b.seeds.forEach((_, i) => opts.push([`seed:${b.id}:${i + 1}`, `${b.name} seed #${i + 1}`])));
+      (c.matchups || []).filter((m) => m.playoff && m.label && m.id !== skip).forEach((m) => { opts.push([`w:${m.id}`, `Winner of ${m.label}`]); opts.push([`l:${m.id}`, `Loser of ${m.label}`]); });
+      groups.flatMap((g) => g.teams || []).forEach((t) => opts.push([`t:${t.id}`, t.name]));
+      return (sel === undefined ? '' : `<option value="" ${sel ? '' : 'selected'}>TBD</option>`) + opts.map(([v, l]) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    };
+    return `<div class="form-row">${groups.length > 1 ? `<label class="field"><span class="label">${word === 'pool' ? 'Pool' : 'Division'}</span><select data-c="play-div"><option value="all">All</option>${groups.map((g) => `<option value="${esc(g.name)}" ${playDiv === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>` : ''}</div>
+      ${brackets.map(bracketView).join('') || '<p class="muted">No brackets yet.</p>'}
+      ${extra.length ? `<h3>Other playoff games</h3><div class="bk-round">${extra.map(gameCard).join('')}</div>` : ''}
+      ${admin ? `</section><section class="panel"><h2>New bracket</h2><form class="form-row" data-form="bracket"><label class="field grow"><span class="label">Name</span><input name="name" type="text" value="${esc(playDiv !== 'all' ? playDiv + ' playoffs' : 'Playoffs')}" autocomplete="off"></label>
+        ${groups.length ? `<label class="field"><span class="label">${word === 'pool' ? 'Pool' : 'Division'}</span><select name="group"><option value="">Whole competition</option>${groups.map((g) => `<option value="${esc(g.name)}" ${playDiv === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>` : ''}
+        <label class="field"><span class="label">Teams</span><input name="n" type="number" min="3" max="12" value="8" required></label><button class="btn primary" type="submit">Create bracket</button></form>
+        <p class="small muted">3 to 12 teams. Top seeds get the byes. Seed teams once it's made, then schedule its games on the Schedule tab.</p>
+        <h3>Add a single game</h3><form class="form-row" data-form="po-game"><label class="field grow"><span class="label">Team or spot</span><select name="a">${sources()}</select></label><label class="field grow"><span class="label">vs</span><select name="b">${sources()}</select></label><button class="btn" type="submit">Add game</button></form>
+        <p class="small muted">For odd byes, crossovers or anything custom: point each side at a seed, the winner or loser of another game, or a team.</p>` : ''}`;
+  }
+  const srcKey = (s) => (!s ? '' : s.seed ? `seed:${s.bracket}:${s.seed}` : s.winner ? `w:${s.winner}` : s.loser ? `l:${s.loser}` : s.team ? `t:${s.team.id}` : '');
+  const parseSrc = (v) => { if (!v) return null; const [k, x, y] = v.split(':'); if (k === 'seed') return { bracket: x, seed: Number(y) }; if (k === 'w') return { winner: x }; if (k === 'l') return { loser: x }; const t = allTeams().find((q) => q.id === v.slice(2)); return t ? { team: { id: t.id, name: t.name } } : null; };
+
+  // Point an older game of ours at a league game: competition, division and opponent.
+  function leagueLinkRow(g) {
+    const list = comps().filter(isCompAdmin), sel = (linkDraft.comp && compOf(linkDraft.comp)) || list[0];
+    if (!sel) return '<p class="small muted">You need to run a competition to link games to it.</p>';
+    const opp = (g.opp || '').toLowerCase();
+    const teams = (sel.groups || []).flatMap((gr) => (gr.teams || []).map((t) => ({ ...t, group: gr.name }))).filter((t) => t.id !== g.t.id);
+    const guess = teams.find((t) => t.name.toLowerCase() === opp) || teams.find((t) => opp && (t.name.toLowerCase().includes(opp) || opp.includes(t.name.toLowerCase())));
+    const mine = groupOf(sel, g.t.id);
+    return `<form class="game-edit league-link" data-form="league-link"><strong>Link to a league game</strong>
+      <div class="form-row"><label class="field"><span class="label">Competition</span><select data-c="link-comp">${list.map((c) => `<option value="${c.id}" ${c === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
+      ${(sel.groups || []).length ? `<label class="field"><span class="label">${sel.kind === 'tournament' ? 'Pool' : 'Division'}</span><select name="group">${sel.groups.map((gr) => `<option value="${esc(gr.name)}" ${(g.grp || (guess ? guess.group : mine && mine.name)) === gr.name ? 'selected' : ''}>${esc(gr.name)}</option>`).join('')}</select></label>` : ''}
+      <label class="field grow"><span class="label">Opponent</span><select name="opp">${teams.map((t) => `<option value="${esc(t.id)}" ${guess && guess.id === t.id ? 'selected' : ''}>${esc(t.name)} · ${esc(t.group)}</option>`).join('')}<option value="__new" ${guess ? '' : 'selected'}>Add "${esc(g.opp || 'Opponent')}" as a new team</option></select></label>
+      <label class="check"><input type="checkbox" name="playoff"> Playoff game</label></div>
+      <div class="chips"><button class="btn primary" type="submit">Link</button><button class="btn" type="button" data-a="link-close">Cancel</button></div>
+      <p class="small muted">The game and its score count for ${esc(sel.name)}${mine ? '' : `, and ${esc(g.t.team)} joins the ${sel.kind === 'tournament' ? 'pool' : 'division'} you pick`}.</p></form>`;
+  }
+  // Replace one team record with another everywhere it's referenced.
+  function mergeTeamRefs(fromId, to) {
+    const ref = { id: to.id, name: to.name };
+    comps().forEach((c) => {
+      let hit = false;
+      (c.groups || []).forEach((g) => {
+        const from = (g.teams || []).find((t) => t.id === fromId);
+        if (!from) return;
+        hit = true;
+        if (g.teams.some((t) => t.id === to.id)) g.teams = g.teams.filter((t) => t !== from);
+        else Object.assign(from, ref);
+      });
+      (c.brackets || []).forEach((b) => b.seeds.forEach((s, i) => { if (s && s.id === fromId) { b.seeds[i] = { ...ref }; hit = true; } }));
+      (c.matchups || []).forEach((m) => {
+        let mh = false;
+        [m.a, m.b].forEach((x) => { if (x.id === fromId) { Object.assign(x, ref); mh = true; } });
+        if (m.src) [m.src.a, m.src.b].forEach((s) => { if (s && s.team && s.team.id === fromId) { s.team = { ...ref }; mh = true; } });
+        if (mh) { hit = true; if (m.slot) publishMatchup(c, m); }
+      });
+      if (hit) { resolvePlayoffs(c); touchComp(c); }
+    });
+    Root.teams.forEach((t) => {
+      (t.schedule || []).forEach((x) => { if (x.oppTeamId === fromId) { x.oppTeamId = to.id; x.opponent = to.name; } });
+      if ((t.links || []).some((l) => l.id === fromId)) t.links = t.links.filter((l) => l.id !== fromId && l.id !== to.id).concat(ref);
+    });
+  }
+
+
+  function compSchedule(c, admin) {
+    const dates = slotDates(c);
+    if (!(c.sites || []).some((s) => siteHours(s).length && (s.fields || []).length)) return '<p class="muted">Add sites, fields and schedulable hours first (Fields tab).</p>';
+    if (!dates.includes(schedDate)) schedDate = dates.find((d) => d >= localDay()) || dates[0];
+    const step = 15, sites = (c.sites || []).filter((s) => (s.fields || []).length), groups = c.groups || [];
+    if (schedSite !== 'all' && !sites.some((s) => s.id === schedSite)) schedSite = 'all';
+    if (schedDiv !== 'all' && !groups.some((g) => g.name === schedDiv)) schedDiv = 'all';
+    const cols = windowsOn(c, schedDate).filter((f) => schedSite === 'all' || f.siteId === schedSite);
+    const lo = Math.min(...cols.flatMap((f) => f.wins.map((w) => w[0]))), hi = Math.max(...cols.flatMap((f) => f.wins.map((w) => w[1])));
+    const mine = (m) => schedDiv === 'all' || m.group === schedDiv;
+    const games = (c.matchups || []).filter((m) => m.slot && m.slot.date === schedDate), open = (c.matchups || []).filter((m) => !m.slot && !m.linked && mine(m));
+    const chip = (m, placed) => {
+      const why = placed ? '' : siteConflict(c, m), other = placed && !mine(m), drag = admin && !other;
+      return `<span class="mu ${muSel === m.id ? 'sel' : ''} ${why ? 'bad' : ''} ${other ? 'other' : ''}" ${drag ? `data-a="mu-pick" data-id="${m.id}" data-drag="mu:${m.id}"` : ''} title="${esc(why || m.group || '')}">${placed && drag ? `<i class="grip top" data-drag="grip:top:${m.id}" title="Drag to start earlier or later"></i>` : ''}<span class="mu-txt">${placed ? `<span class="small">${ampm(m.slot.start)}–${ampm(hm(HM(m.slot.start) + lenOf(c, m)))}${other ? ' · ' + esc(m.group) : ''}</span>` : ''}<b>${esc(m.a.name)}</b> v <b>${esc(m.b.name)}</b></span>${placed && drag ? `<button type="button" data-a="mu-unslot" data-id="${m.id}" aria-label="Unschedule">✕</button><i class="grip bottom" data-drag="grip:bottom:${m.id}" title="Drag to make the game longer or shorter"></i>` : ''}</span>`;
+    };
+    const rows = [];
+    if (cols.length) for (let t = lo; t < hi; t += step) {
+      rows.push(`<tr data-t="${hm(t)}" class="${t % 60 === 0 ? 'hour' : ''}"><th>${t % 60 === 0 ? ampm(hm(t)) : ''}</th>${cols.map((f) => {
+        const g = games.find((m) => m.slot.fieldId === f.fieldId && HM(m.slot.start) === t);
+        if (g) return `<td class="slot full ${mine(g) ? '' : 'other'}" rowspan="${Math.ceil(lenOf(c, g) / step)}" data-f="${f.fieldId}" data-t="${hm(t)}">${chip(g, true)}</td>`;
+        if (games.some((m) => m.slot.fieldId === f.fieldId && HM(m.slot.start) < t && HM(m.slot.start) + lenOf(c, m) > t)) return '';
+        const inside = f.wins.some(([s, e]) => t >= s && t < e);
+        if (!inside) return '<td class="noslot"></td>';
+        return `<td class="slot" data-f="${f.fieldId}" data-t="${hm(t)}" ${admin ? `data-a="slot-pick" data-drop="slot:${f.fieldId}|${hm(t)}"` : ''}></td>`;
+      }).join('')}</tr>`);
+    }
+    return `<div class="form-row"><label class="field"><span class="label">Day</span><select data-c="sched-date">${dates.map((d) => `<option value="${d}" ${d === schedDate ? 'selected' : ''}>${esc(longDate(d))}${(c.matchups || []).some((m) => m.slot && m.slot.date === d) ? ' •' : ''}</option>`).join('')}</select></label>
+      <label class="field"><span class="label">Site</span><select data-c="sched-site"><option value="all">All sites</option>${sites.map((s) => `<option value="${s.id}" ${schedSite === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
+      ${groups.length > 1 ? `<label class="field"><span class="label">${c.kind === 'tournament' ? 'Pool' : 'Division'}</span><select data-c="sched-div"><option value="all">All</option>${groups.map((g) => `<option value="${esc(g.name)}" ${schedDiv === g.name ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>` : ''}
+      <span class="right"><button type="button" class="btn small-btn" data-a="comp-export">Copy schedule as text</button><button type="button" class="btn small-btn" data-a="reconcile">Fix out-of-date games</button></span></div>
+      ${admin ? `<p class="small muted">${open.length} matchups to schedule. Drag one onto a field at any quarter hour (or tap it, then the time). Drag a placed game to move it, or its top or bottom edge to change its length. Red ones can't be played at this site today.</p><div class="mu-tray" data-drop="mu-tray">${open.map((m) => chip(m)).join('') || '<span class="small muted">Everything is scheduled.</span>'}</div>` : ''}
+      ${cols.length ? `<div class="tbl-wrap"><table class="sched" data-len="${c.slotMin || 90}"><thead><tr><th></th>${cols.map((f) => `<th>${esc(f.label)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '<p class="muted">No open hours on this day.</p>'}
+      <p class="small muted">Striped cells are outside the site's hours. ${schedDiv !== 'all' ? 'Darker games are from other divisions.' : ''}</p>`;
+  }
   // Maps: Google when the project has it turned on, otherwise OpenStreetMap.
   let mapsLib = null, mapState = null;
   function loadScript(src) { return new Promise((ok, bad) => { const s = document.createElement('script'); s.src = src; s.async = true; s.onload = ok; s.onerror = bad; document.head.appendChild(s); }); }
@@ -1333,8 +1756,8 @@ ${JSON.stringify(data)}`;
     const dated = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const zero = { played: 0, O: 0, D: 0, touch: 0, goal: 0, assist: 0, turn: 0, block: 0 };
     const games = [
-      ...(g ? [{ key: 'current', label: `${dated(g.startedAt)} vs ${g.opponent || 'Opponent'}`, note: 'In progress', us: count(g.points, 'us'), them: count(g.points, 'them'), t: Report.totals(g.points).get(p.id) || zero, points: g.points }] : []),
-      ...S.history.slice().reverse().map((h) => ({ key: h.id, label: `${dated(h.date)} vs ${h.opponent || 'Opponent'}`, note: '', us: h.us, them: h.them, t: { ...zero, ...(h.perPlayer[p.id] || {}) }, points: h.points || [] })),
+      ...(g ? [{ key: 'current', label: `${(() => { const x = g.scheduleId && S.schedule.find((y) => y.id === g.scheduleId); return x && x.date ? shortDay(x.date) : dated(g.startedAt); })()} vs ${g.opponent || 'Opponent'}`, note: 'In progress', us: count(g.points, 'us'), them: count(g.points, 'them'), t: Report.totals(g.points).get(p.id) || zero, points: g.points }] : []),
+      ...S.history.slice().reverse().map((h) => ({ key: h.id, label: `${shortDay(gameDay(h))} vs ${h.opponent || 'Opponent'}`, note: '', us: h.us, them: h.them, t: { ...zero, ...(h.perPlayer[p.id] || {}) }, points: h.points || [] })),
     ].filter((x) => x.t.played > 0);
     const all = games.flatMap((x) => x.points);
     const sum = { ...zero };
@@ -1359,7 +1782,7 @@ ${JSON.stringify(data)}`;
       return `<details ${gi < 3 ? 'open' : ''}><summary>${esc(x.label)} · ${x.t.played} points</summary>${rows}</details>`;
     }).join('');
     return `<section class="panel">
-      <div class="panel-head"><button type="button" class="btn small-btn back" data-a="player-back" aria-label="Back">←</button><h2>${nameTag(p)}</h2><span class="right">${insightBtn('player', p.id)}<button type="button" class="btn small-btn" data-a="edit" data-id="${p.id}">Edit player</button></span></div>
+      <div class="panel-head"><button type="button" class="btn small-btn back" data-a="player-back" aria-label="Back">←</button><h2>${nameTag(p)}${p.nick ? ` <span class="muted nick">“${esc(p.nick)}”</span>` : ''}${p.youth ? ' <span class="tag-comp">Youth</span>' : ''}</h2><span class="right">${insightBtn('player', p.id)}<button type="button" class="btn small-btn" data-a="edit" data-id="${p.id}">Edit player</button></span></div>
       <p class="small muted">${allSkills().map(([k, l]) => `${esc(l)} ${E.rate(p, k)}`).join(' · ')}${p.tags.length ? ' · ' + esc(p.tags.join(', ')) : ''} · ${TARGET_LABEL[p.target]} playtime · Minimum ${E.minPointsOf(p)}</p>
       <div class="figures">${figures.map(([l, v]) => `<div class="figure"><span class="label">${l}</span><b>${v}</b></div>`).join('')}</div>
       <h3>Games</h3>
@@ -1485,8 +1908,15 @@ ${JSON.stringify(data)}`;
     return `<div class="to-row"><button type="button" class="btn small-btn" data-a="timeout" data-v="us" ${us ? '' : 'disabled'}>Our timeout · ${us} left</button><button type="button" class="btn small-btn" data-a="timeout" data-v="them" ${them ? '' : 'disabled'}>Their timeout · ${them} left</button>${last ? `<button type="button" class="btn small-btn" data-a="undo-timeout">Undo ${last.who === 'us' ? 'our' : 'their'} timeout</button>` : ''}</div>`;
   }
   const CAPS = [['softCap', 'Soft cap'], ['hardCap', 'Hard cap'], ['timeCap', 'Time cap']];
+  // Caps count from the scheduled start, when the game was started near that time; otherwise from when it was started here.
+  function capStart(g, t) {
+    const x = g.scheduleId && ((t || S).schedule || []).find((y) => y.id === g.scheduleId);
+    if (!x || !x.date || !x.time) return g.startedAt;
+    const k = whenKey(x), at = new Date(`${k.slice(0, 10)}T${k.slice(11)}:00`).getTime();
+    return Number.isFinite(at) && Math.abs(g.startedAt - at) < 3 * 3600000 ? at : g.startedAt;
+  }
   function capClock(g) {
-    const el = Date.now() - g.startedAt, next = CAPS.map(([k, l]) => [l, rv(k, 0) * 60000]).filter(([, ms]) => ms > el).sort((a, b) => a[1] - b[1])[0];
+    const el = Date.now() - capStart(g), next = CAPS.map(([k, l]) => [l, rv(k, 0) * 60000]).filter(([, ms]) => ms > el).sort((a, b) => a[1] - b[1])[0];
     return `Game ${clock(el)}${next ? ` · ${next[0]} in ${clock(next[1] - el)}` : ''}`;
   }
   // A short, soft confirmation: a low, warm chord through a gentle filter, with a faint bright edge on the attack.
@@ -1517,7 +1947,7 @@ ${JSON.stringify(data)}`;
   function capCheck() {
     const g = S && S.game;
     if (!g || (g.live && !g.live.review)) return;
-    const el = Date.now() - g.startedAt, sc = E.score(g), hi = Math.max(sc.us, sc.them);
+    const el = Date.now() - capStart(g), sc = E.score(g), hi = Math.max(sc.us, sc.them);
     for (const [k, label] of CAPS) {
       const ms = rv(k, 0) * 60000;
       if (!ms) continue;
@@ -1580,10 +2010,14 @@ ${JSON.stringify(data)}`;
     return `<div class="scrim" data-a="settings-close" data-self="1"><div class="sheet" role="dialog" aria-label="Settings">
       <div class="panel-head"><h2>Settings</h2><button type="button" class="btn small-btn primary" data-a="settings-close">Done</button></div>
       <div class="label">Color scheme</div>
-      <div class="schemes">${SCHEMES.map(([k, l, d]) => `<button type="button" class="scheme" data-a="set-scheme" data-v="${k}" aria-pressed="${cur === k}" data-preview="${k}">${k === 'team' ? (() => { const v = teamVars(); return `<span class="swatch" style="background:${v['--bg']}"><i style="background:${v['--accent']}"></i><i style="background:${v['--cone']}"></i><i style="background:${v['--ink']}"></i></span>`; })() : '<span class="swatch"><i></i><i></i><i></i></span>'}<strong>${l}</strong><span class="small muted">${d}</span></button>`).join('')}</div>
+      <div class="schemes">${SCHEMES.map(([k, l, d]) => `<button type="button" class="scheme" data-a="set-scheme" data-v="${k}" aria-pressed="${cur === k}" data-preview="${k}">${k === 'team' ? (() => { const v = teamVars(Root.teamDark); return `<span class="swatch" style="background:${v['--bg']}"><i style="background:${v['--accent']}"></i><i style="background:${v['--cone']}"></i><i style="background:${v['--ink']}"></i></span>`; })() : '<span class="swatch"><i></i><i></i><i></i></span>'}<strong>${l}</strong><span class="small muted">${d}</span></button>`).join('')}</div>
+      ${cur === 'team' ? `<div class="rl"><span>Team colors, light or dark</span>${seg('team-dark', Root.teamDark ? 'dark' : 'light', [['light', 'Light'], ['dark', 'Dark']])}</div>` : ''}
       ${CloudLink ? `<div class="label">Account</div>
       ${CloudLink.user ? `<div class="sub-row"><span><strong>${esc(CloudLink.user.email || 'Signed in')}</strong><br><span class="small muted">${esc(CloudLink.status || 'Connecting…')}</span></span><button type="button" class="btn small-btn" data-a="cloud-out">Sign out</button></div>` : `<div><button type="button" class="btn small-btn primary" data-a="cloud-in">Sign in with Google</button></div><p class="small muted">Sign in to keep your teams in your account and use them on every device. Your work stays on this device until you do.</p>`}
-      ${CloudLink.problem ? `<p class="small bad-text" role="status">${esc(CloudLink.problem)}</p>` : ''}` : ''}
+      ${CloudLink.problem ? `<p class="small bad-text" role="status">${esc(CloudLink.problem)}</p>` : ''}
+      ${CloudLink.user ? (() => { const r = myRoles(); return `<div class="label">Your roles</div>${r.length ? `<div class="taglist">${r.map(([k, v]) => `<span class="chip"><b>${esc(k)}</b>&nbsp;${esc(v)}</span>`).join('')}</div>` : '<p class="small muted">None yet. Roles come from teams, rosters and competitions that list this email.</p>'}`; })() : ''}` : ''}
+      ${CloudLink && CloudLink.user ? '<div><button type="button" class="btn small-btn" data-a="resync">Re-sync with the cloud</button> <span class="small muted">Re-sends everything and fixes games that no longer match their league schedule.</span></div>' : ''}
+      ${CloudLink && CloudLink.god ? '<p class="small"><b>Superuser:</b> you can see and edit every team and competition.</p>' : ''}
       <div class="label">On this device I'm</div>
       <div>${seg('game-role', role(), [['both', 'Doing both'], ['lines', 'Calling lines'], ['events', 'Logging events']])}</div>
       <p class="small muted">When two coaches share a game, each device can focus on one job.</p>
@@ -1604,7 +2038,8 @@ ${JSON.stringify(data)}`;
       const r = px[i], g = px[i + 1], b = px[i + 2], max = Math.max(r, g, b), min = Math.min(r, g, b), sat = max ? (max - min) / max : 0;
       if (min > 235) continue;
       const k = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4), cur = bins.get(k) || { n: 0, r: 0, g: 0, b: 0 };
-      const w = 1 + sat * 3; cur.n += w; cur.r += r * w; cur.g += g * w; cur.b += b * w; bins.set(k, cur);
+      // Black, white and grays count for little next to real colors.
+      const w = max < 45 || sat < 0.15 ? 0.08 : 0.3 + sat * 4; cur.n += w; cur.r += r * w; cur.g += g * w; cur.b += b * w; bins.set(k, cur);
     }
     const out = [];
     [...bins.values()].sort((x, y) => y.n - x.n).forEach((c) => {
@@ -1619,11 +2054,17 @@ ${JSON.stringify(data)}`;
   const mixHex = (a, b, w) => { const x = rgbOf(a), y = rgbOf(b); return hexOf(x.map((v, i) => v * (1 - w) + y[i] * w)); };
   const lum = (h) => { const l = rgbOf(h).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]; };
   const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const lightUntil = (c, bg, ratio) => { let x = c; for (let i = 0; i < 20 && contrast(x, bg) < ratio; i++) x = mixHex(x, '#ffffff', 0.12); return x; };
   const darkUntil = (c, bg, ratio) => { let x = c; for (let i = 0; i < 20 && contrast(x, bg) < ratio; i++) x = mixHex(x, '#000000', 0.12); return x; };
   // A light scheme built from the team's colors, with text kept readable.
-  function teamVars() {
+  function teamVars(dark) {
     const pal = S.palette && S.palette.length ? S.palette : [Report.safeColor(S.color)];
     const p = pal[0], s2 = pal[1] || mixHex(p, '#000000', 0.3);
+    if (dark) {
+      const bg = mixHex(p, '#05070f', 0.86), panel = mixHex(p, '#05070f', 0.78), accent = lightUntil(p, panel, 4.6), cone = lightUntil(s2, panel, 4.6), ink = mixHex(p, '#ffffff', 0.92);
+      const [r, g, b] = rgbOf(accent);
+      return { '--bg': bg, '--panel': panel, '--panel-2': mixHex(p, '#05070f', 0.66), '--line': mixHex(p, '#05070f', 0.5), '--ink': ink, '--muted': lightUntil(mixHex(p, '#9aa0b4', 0.6), panel, 4.6), '--accent': accent, '--on-accent': bg, '--cone': cone, '--on-cone': bg, '--meter': accent, '--tick': ink, '--tile': ink, '--on-tile': bg, '--us-tint': `rgba(${r}, ${g}, ${b}, .2)` };
+    }
     const panel = mixHex(p, '#ffffff', 0.97), accent = darkUntil(p, '#ffffff', 4.6), cone = darkUntil(s2, '#ffffff', 4.6), ink = mixHex(darkUntil(p, '#ffffff', 12), '#000000', 0.2);
     const [r, g, b] = rgbOf(accent);
     return { '--bg': mixHex(p, '#ffffff', 0.9), '--panel': panel, '--panel-2': mixHex(p, '#ffffff', 0.84), '--line': mixHex(p, '#ffffff', 0.7), '--ink': ink, '--muted': darkUntil(mixHex(p, '#6b7280', 0.6), panel, 4.6), '--accent': accent, '--on-accent': '#ffffff', '--cone': cone, '--on-cone': '#ffffff', '--meter': accent, '--tick': ink, '--tile': ink, '--on-tile': '#ffffff', '--us-tint': `rgba(${r}, ${g}, ${b}, .13)` };
@@ -1633,7 +2074,7 @@ ${JSON.stringify(data)}`;
     const t = Root.theme || 'system', root = document.documentElement;
     teamVarsSet.forEach((k) => root.style.removeProperty(k)); teamVarsSet = [];
     if (t === 'system') delete root.dataset.scheme;
-    else if (t === 'team') { root.dataset.scheme = 'light'; Object.entries(teamVars()).forEach(([k, v]) => { root.style.setProperty(k, v); teamVarsSet.push(k); }); }
+    else if (t === 'team') { root.dataset.scheme = Root.teamDark ? 'dark' : 'light'; Object.entries(teamVars(Root.teamDark)).forEach(([k, v]) => { root.style.setProperty(k, v); teamVarsSet.push(k); }); }
     else root.dataset.scheme = t;
   }
   // A focused field losing focus mid-render can fire a change that asks for another render; finish this one first.
@@ -1651,10 +2092,12 @@ ${JSON.stringify(data)}`;
     const caret = active && document.activeElement.selectionStart;
     const g = S.game;
     let view;
-    if (tab === 'game') view = !g ? setupScreen() : editIdx !== null && g.points[editIdx] ? pointEditor() : g.live ? liveScreen() : draftScreen();
+    if (tab === 'game' && boxOpen) view = statsScreen('<button type="button" class="btn small-btn" data-a="box-close">← Back to the game</button>');
+    else if (tab === 'game' && sheetOpen) view = scoresheetScreen('<button type="button" class="btn small-btn" data-a="sheet-close">← Back to the game</button>');
+    else if (tab === 'game') view = !g ? setupScreen() : editIdx !== null && g.points[editIdx] ? pointEditor() : g.live ? liveScreen() : draftScreen();
     else if (tab === 'games') view = gamesScreen();
     else if (tab === 'comps') view = competitionsScreen();
-    else if (tab === 'roster') view = rosterScreen();
+    else if (tab === 'roster') view = teamOpen === S.id ? rosterScreen() : teamOpen ? teamInfo(teamOpen) : teamsList();
     else if (tab === 'players') view = playerOpen && P(playerOpen) ? playerProfile(P(playerOpen)) : playersScreen();
     else if (tab === 'time') view = (g || S.history.length) ? playtimeScreen() : '<section class="panel"><h2>Playtime</h2><p class="muted">Start a game and each player\'s points and minutes show up here.</p></section>';
     else view = rulesScreen();
@@ -1662,7 +2105,7 @@ ${JSON.stringify(data)}`;
     root.innerHTML = `<div class="wrap">
       <header class="bar"><h1 class="brand">Line Caller</h1><button type="button" class="team-now" data-a="tab" data-v="roster">${S.logo ? `<img class="team-logo" src="${S.logo}" alt="">` : ''}${esc(S.team)}</button><nav class="tabs">${tabs.map(([k, l]) => `<button type="button" class="tab" data-a="tab" data-v="${k}" ${tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}${CloudLink && !CloudLink.user ? '<button type="button" class="tab" data-a="cloud-in">Sign in</button>' : ''}${CloudLink && CloudLink.user ? avatar(CloudLink.user) : ''}<button type="button" class="tab" data-a="settings-open">Settings</button></nav></header>
       ${S.isExample ? `<div class="banner"><span>You're looking at an example team. The players and ratings are made up.</span>${twoTap('clear', 'clear-example', 'Clear it and add my team', 'Tap again to clear')}</div>` : ''}
-      ${view}</div>${editing ? editSheet() : ''}${sendFor ? sendSheet() : ''}${settingsOpen ? settingsSheet() : ''}${insight ? insightSheet() : ''}${pointSheet ? pointSheetView() : ''}${halftimeOpen && S.game ? halftimeView() : ''}${menuView()}`;
+      ${view}</div>${editing ? editSheet() : ''}${sendFor ? sendSheet() : ''}${settingsOpen ? settingsSheet() : ''}${insight ? insightSheet() : ''}${pointSheet ? pointSheetView() : ''}${halftimeOpen && S.game ? halftimeView() : ''}${scoreEntry ? scoreSheetView() : ''}${menuView()}`;
     applyTableSorts();
     document.documentElement.style.setProperty('--team', Report.safeColor(S.color));
     if (active) { const el = document.getElementById(active); if (el) { el.focus(); if (caret !== null && caret !== undefined && el.setSelectionRange) try { el.setSelectionRange(caret, caret); } catch (e) { /* not a text field */ } } }
@@ -1731,14 +2174,23 @@ ${JSON.stringify(data)}`;
     tipEl.style.top = '72px';
     clearTimeout(tipTimer); tipTimer = setTimeout(hideTip, 2500);
   }
+  const ENDZONE = 20 / 120;
   function addStats(list) {
     if (list.length && Root.entrySound !== false) tick();
     const at = Date.now(), pt = activePt();
+    // Field view: we attack the top. A catch in that endzone is a goal; an interception there is a Callahan.
+    let scored = false, callahan = false;
+    if (pendingSpot && pendingSpot.y <= ENDZONE && list.length === 1 && list[0].id && (list[0].t === 'touch' || (list[0].t === 'block' && list[0].sub === 'int'))) {
+      callahan = list[0].t === 'block'; scored = true;
+      list = callahan ? [list[0], { t: 'goal', id: list[0].id }] : [{ t: 'goal', id: list[0].id }];
+    }
     pt.events = pt.events || [];
     const before = pt.events.length;
     list.forEach((ev) => E.addEvent(pt.events, ev, at));
     // Visual entry: the spot tapped on the field goes with what was just added.
     if (pendingSpot) { pt.events.slice(before).filter((e) => !e.implicit && !e.auto && e.t !== 'assist').forEach((e) => { e.x = pendingSpot.x; e.y = pendingSpot.y; }); pendingSpot = null; }
+    if (callahan) { const gi = pt.events.map((e) => e.t).lastIndexOf('goal'); pt.events = E.setCallahan(pt.events, gi, true); }
+    if (scored && editIdx === null && G().live && !G().live.review) { setTimeout(() => { if (G() && G().live && !G().live.review) A.result({ v: 'us' }); flash(callahan ? 'Callahan!' : 'Caught in the endzone: goal.'); }, 0); }
   }
   function fixPlayer(out, inn) {
     const pt = activePt();
@@ -1860,14 +2312,65 @@ ${JSON.stringify(data)}`;
   /* ---------- Actions ---------- */
   function resume(l) { if (!l.pausedAt) return; const d = Date.now() - l.pausedAt; l.startedAt += d; (l.subs || []).forEach((s) => { s.at += d; }); (l.events || []).forEach((e) => { if (e.at) e.at += d; }); delete l.pausedAt; }
   const A = {
-    tab(d) { stopVoice(); uiChange(() => { editingComp = null; tab = d.v; sel = null; voice = null; menu = null; editIdx = null; fixLine = false; }); },
+    tab(d) { stopVoice(); uiChange(() => { editingComp = null; sheetOpen = false; boxOpen = false; tab = d.v; sel = null; voice = null; menu = null; editIdx = null; fixLine = false; }); },
     confirm(d, el) {
       if (confirmKey === d.key) { clearTimeout(confirmTimer); confirmKey = null; A[d.then](d, el); return; }
       confirmKey = d.key; render(); clearTimeout(confirmTimer);
       confirmTimer = setTimeout(() => { confirmKey = null; render(); }, 3000);
     },
     'clear-example'() { commit(() => { const fresh = blank(); Root.teams[Root.teams.indexOf(S)] = fresh; Root.active = fresh.id; S = fresh; tab = 'roster'; editing = null; sel = null; }); },
-    'switch-team'(d) { stopVoice(); editIdx = null; playerOpen = null; commit(() => { Root.active = d.v; S = activeTeam(); sel = null; voice = null; editing = null; pointsSource = 'current'; }); },
+    'team-open'(d) {
+      const mine = Root.teams.find((t) => t.id === d.id);
+      if (mine) { stopVoice(); editIdx = null; playerOpen = null; commit(() => { Root.active = d.id; S = activeTeam(); sel = null; voice = null; editing = null; pointsSource = 'current'; teamOpen = d.id; teamView = 'roster'; }); }
+      else uiChange(() => { teamOpen = d.id; });
+      window.scrollTo(0, 0);
+    },
+    'team-close'() { uiChange(() => { teamOpen = null; }); },
+    'team-filter'(d) { uiChange(() => { teamFilter = d.v; }); },
+    'team-adopt'(d) { commit(() => { const t = adoptTeam(d.id); if (t) { Root.active = t.id; S = t; teamOpen = t.id; teamView = 'roster'; } }); },
+    'ph-unlink'(d) { commit(() => { const t = allTeams().find((x) => x.id === d.id); phUpdate(d.id, { links: ((t && t.links) || []).filter((l) => l.id !== d.v) }); const o = Root.teams.find((x) => x.id === d.v); if (o) o.links = (o.links || []).filter((l) => l.id !== d.id); }); },
+    'bk-edit'(d) { uiChange(() => { bkEdit = bkEdit === d.id ? null : d.id; }); },
+    'bk-rename'(d) { uiChange(() => { bkRename = d.id; }); setTimeout(() => { const el = document.querySelector('input.bk-label'); if (el) { el.focus(); el.select(); } }, 0); },
+    'mu-toggle'(d) { uiChange(() => { if (muShut.has(d.v)) muShut.delete(d.v); else muShut.add(d.v); }); },
+    'games-toggle'(d) { uiChange(() => { if (gamesShut.has(d.v)) gamesShut.delete(d.v); else gamesShut.add(d.v); }); },
+    'link-open'(d) { uiChange(() => { linkDraft = { team: d.team, id: d.id, comp: d.comp || (linkDraft && linkDraft.comp) || '' }; }); },
+    'link-close'() { uiChange(() => { linkDraft = null; }); },
+    'seed-standings'(d) {
+      commit(() => {
+        const c = compOf(compView), br = (c.brackets || []).find((b) => b.id === d.b); if (!br) return;
+        const groups = br.group ? c.groups.filter((g) => g.name === br.group) : c.groups || [], teams = groups.flatMap((g) => g.teams || []), ids = teams.map((t) => t.id);
+        const rows = Report.standings(ids, compResults(c).filter((r) => !r.playoff && ids.includes(r.a) && ids.includes(r.b)));
+        br.seeds = br.seeds.map((_, i) => { const t = rows[i] && teams.find((x) => x.id === rows[i].id); return t ? { id: t.id, name: t.name } : null; });
+        resolvePlayoffs(c); touchComp(c);
+      });
+    },
+    'bk-third'(d) {
+      const c = compOf(compView), br = (c.brackets || []).find((b) => b.id === d.b); if (!br) return;
+      const semis = c.matchups.filter((m) => m.bracketId === br.id && m.round === br.rounds - 1);
+      if (semis.length !== 2) { flash('A 3rd-place game needs two semifinals.'); return; }
+      if (c.matchups.some((m) => m.bracketId === br.id && m.round % 1)) { flash('This bracket already has a 3rd-place game.'); return; }
+      commit(() => { addPlayoffGame(c, br, br.rounds - 0.5, { loser: semis[0].id }, { loser: semis[1].id }); resolvePlayoffs(c); touchComp(c); });
+    },
+    'bk-consol'(d) {
+      const c = compOf(compView), br = (c.brackets || []).find((b) => b.id === d.b); if (!br) return;
+      const r1 = c.matchups.filter((m) => m.bracketId === br.id && m.round === 1);
+      if (r1.length < 2) { flash('A consolation bracket needs at least two first-round games.'); return; }
+      commit(() => {
+        // First-round neighbours meet first, like the main bracket's halves.
+        let ent = r1.map((m) => ({ loser: m.id }));
+        if (!(r1.length & (r1.length - 1))) { const order = seedOrder(r1.length), e = []; order.forEach((seed, i) => { e[seed - 1] = ent[i]; }); ent = e; }
+        makeBracket(c, `${br.name} consolation`, br.group, r1.length, ent); touchComp(c);
+      });
+    },
+    'bk-del'(d) {
+      commit(() => {
+        const c = compOf(compView), br = (c.brackets || []).find((b) => b.id === d.b); if (!br) return;
+        c.matchups.filter((m) => m.bracketId === br.id && m.slot).forEach((m) => publishMatchup(c, { ...m, slot: null }));
+        c.matchups = c.matchups.filter((m) => m.bracketId !== br.id); c.brackets = c.brackets.filter((b) => b !== br);
+        resolvePlayoffs(c); touchComp(c);
+      });
+    },
+    'switch-team'(d) { stopVoice(); editIdx = null; playerOpen = null; commit(() => { Root.active = d.v; S = activeTeam(); sel = null; voice = null; editing = null; pointsSource = 'current'; if (tab === 'roster') teamOpen = d.v; }); },
     'delete-team'() { commit(() => { Root.teams = Root.teams.filter((t) => t !== S); Root.active = Root.teams[0].id; S = activeTeam(); sel = null; voice = null; }); },
     'clear-sel'() { uiChange(() => { sel = null; }); },
     'tap-bench'(d) {
@@ -2008,7 +2511,7 @@ ${JSON.stringify(data)}`;
       if (!l) return;
       commit(() => { l.ids.filter((id) => P(id) && !g.out[id] && !g.draft.line[id]).forEach((id) => { if (placedIds().length < targetSize()) place(id, bestPosIn(id)); }); });
     },
-    'comp-open'(d) { uiChange(() => { compView = d.id; compSub = 'overview'; fieldEdit = null; muSel = null; }); window.scrollTo(0, 0); },
+    'comp-open'(d) { uiChange(() => { if (d.go) tab = 'comps'; compView = d.id; compSub = 'overview'; fieldEdit = null; muSel = null; }); window.scrollTo(0, 0); },
     'comp-close'() { uiChange(() => { compView = null; fieldEdit = null; muSel = null; }); },
     'comp-sub'(d) { uiChange(() => { compSub = d.v; fieldEdit = null; muSel = null; }); },
     'comp-kind'(d) { commit(() => { const c = compOf(compView); c.kind = d.v; touchComp(c); }); },
@@ -2019,7 +2522,7 @@ ${JSON.stringify(data)}`;
     'del-comp'(d) { commit(() => { const c = compOf(d.id); (c.matchups || []).filter((m) => m.slot).forEach((m) => publishMatchup(c, { ...m, slot: null })); Root.competitions = comps().filter((x) => x.id !== d.id); Root.teams.forEach((t) => t.schedule.forEach((x) => { if (x.competitionId === d.id && !x.fixtureId) { delete x.competitionId; delete x.group; } })); if (CloudLink && CloudLink.user) CloudLink.deleteComp(d.id); compView = null; }); },
     'site-del'(d) { commit(() => { const c = compOf(compView); c.sites = c.sites.filter((s) => s.id !== d.s); touchComp(c); }); },
     'field-del'(d) { commit(() => { const c = compOf(compView), s = c.sites.find((x) => x.id === d.s); s.fields = s.fields.filter((f) => f.id !== d.f); touchComp(c); }); },
-    'hours-rm'(d) { commit(() => { const c = compOf(compView), f = c.sites.find((x) => x.id === d.s).fields.find((x) => x.id === d.f); f.hours.splice(Number(d.i), 1); touchComp(c); }); },
+    'hours-rm'(d) { commit(() => { const c = compOf(compView), s = c.sites.find((x) => x.id === d.s); s.hours = siteHours(s).slice(); s.hours.splice(Number(d.i), 1); (s.fields || []).forEach((f) => { delete f.hours; }); touchComp(c); }); },
     'field-map'(d) { uiChange(() => { fieldEdit = { s: d.s, f: d.f }; }); },
     'field-map-close'() { uiChange(() => { fieldEdit = null; }); },
     'field-map-save'() {
@@ -2038,15 +2541,58 @@ ${JSON.stringify(data)}`;
         touchComp(c);
       });
     },
-    'mu-del'(d) { commit(() => { const c = compOf(compView), m = c.matchups.find((x) => x.id === d.id); if (m.slot) publishMatchup(c, { ...m, slot: null }); c.matchups = c.matchups.filter((x) => x.id !== d.id); touchComp(c); }); },
+    'mu-del'(d) { commit(() => { const c = compOf(compView), m = c.matchups.find((x) => x.id === d.id); if (m.slot) publishMatchup(c, { ...m, slot: null }); c.matchups = c.matchups.filter((x) => x.id !== d.id); c.matchups.forEach((x) => { if (x.src) ['a', 'b'].forEach((k) => { const r = x.src[k]; if (r && (r.winner === d.id || r.loser === d.id)) x.src[k] = null; }); }); if (bkEdit === d.id) bkEdit = null; resolvePlayoffs(c); touchComp(c); }); },
     'mu-pick'(d) { uiChange(() => { muSel = muSel === d.id ? null : d.id; }); },
     'mu-unslot'(d) { commit(() => { const c = compOf(compView), m = c.matchups.find((x) => x.id === d.id); m.slot = null; publishMatchup(c, m); touchComp(c); muSel = null; }); },
-    'slot-pick'(d) { if (!muSel) { flash('Tap a matchup first, then the slot.'); return; } placeMatchup(muSel, d.f, d.t); },
+    'slot-pick'(d) { if (!muSel) { flash('Tap a matchup first, then the time.'); return; } placeMatchup(muSel, d.f, d.t); },
+    'comp-export'() {
+      const c = compOf(compView), list = (c.matchups || []).filter((m) => m.slot).sort((x, y) => (x.slot.date + x.slot.start).localeCompare(y.slot.date + y.slot.start));
+      const txt = `${c.name}\n` + list.map((m) => { const f = fieldById(c, m.slot.fieldId); return `${longDate(m.slot.date)} ${ampm(m.slot.start)} — ${m.a.name} vs ${m.b.name}${f ? ' — ' + f.label : ''}${m.group ? ` (${m.group})` : ''}`; }).join('\n');
+      copyText(txt, `${list.length} games copied.`);
+    },
+    'sched-export'() {
+      const list = S.schedule.slice().sort((x, y) => whenKey(x).localeCompare(whenKey(y)));
+      const txt = `${S.team}\n` + list.map((x) => `${longDate(x.date)}${x.time ? ' ' + x.time : ''} — ${x.kind === 'practice' ? 'Practice' : `vs ${x.opponent || 'Opponent'}`}${x.location ? ' — ' + x.location : ''}${x.competitionId && compOf(x.competitionId) ? ` (${compOf(x.competitionId).name}${x.group ? ' · ' + x.group : ''})` : ''}${x.gameId ? ` · Final ${x.us}–${x.them}` : ''}`).join('\n');
+      copyText(txt, `${list.length} lines copied.`);
+    },
+    'sched-import'() { uiChange(() => { importing = importing ? null : { text: '', rows: null }; }); },
+    'import-read'() { const el = document.getElementById('import-text'); uiChange(() => { importing.text = el.value; importing.rows = Report.parseSchedule(el.value).map((x) => ({ ...x, on: true })); }); },
+    async 'import-ai'() {
+      const el = document.getElementById('import-text'); importing.text = el.value; importing.busy = true; render();
+      try {
+        const reply = await askAI(`Turn this sports schedule into JSON. Today is ${localDay()}. Reply with only a JSON array of objects with keys: kind ("game" or "practice"), date (YYYY-MM-DD), time (like "9:00 AM", or ""), opponent (or ""), location (or ""). Skip lines that aren't events.\n\n${el.value}`);
+        const rows = JSON.parse(reply.slice(reply.indexOf('['), reply.lastIndexOf(']') + 1));
+        importing.rows = rows.filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.date || '')).map((x) => ({ kind: x.kind === 'practice' ? 'practice' : 'game', date: x.date, time: x.time || '', opponent: x.opponent || '', location: x.location || '', on: true }));
+      } catch (e) { flash("AI couldn't read that. Try Read schedule instead."); }
+      importing.busy = false; render();
+    },
+    'import-toggle'(d) { uiChange(() => { const x = importing.rows[Number(d.i)]; x.on = !x.on; }); },
+    'import-add'() {
+      commit(() => { importing.rows.filter((x) => x.on).forEach((x) => { const e = { id: uid(), kind: x.kind, opponent: x.kind === 'practice' ? '' : x.opponent, date: x.date, time: x.time, location: x.location }; linkOpponent(e); S.schedule.push(e); }); importing = null; });
+    },
+    reconcile() { let r; commit(() => { r = reconcile(); }); flash(`Done. ${r.removed} out-of-date ${r.removed === 1 ? 'game' : 'games'} removed from team schedules; ${r.fixed} matchups re-sent.`); },
+    resync() { if (CloudLink && CloudLink.user) { CloudLink.resync(); flash('Re-syncing everything with the cloud…'); } let r; commit(() => { r = reconcile(); }); },
+    'site-toggle'(d) { uiChange(() => { if (siteShut.has(d.s)) siteShut.delete(d.s); else siteShut.add(d.s); }); },
+    'ph-logo-rm'(d) { commit(() => { phUpdate(d.id, { logo: '' }); }); },
+    'rank-by'(d) { uiChange(() => { rankBy = d.v; }); },
     'sched-new'(d) { uiChange(() => { schedOpen = !(schedOpen && schedKind === d.v); schedKind = d.v; }); },
     'halftime-close'() { uiChange(() => { halftimeOpen = false; }); },
     'halftime-open'() { uiChange(() => { halftimeOpen = true; }); },
     'entry-mode'(d) { commit(() => { Root.entryMode = d.v; pendingSpot = null; }); },
     'spot-clear'() { uiChange(() => { pendingSpot = null; }); },
+    'team-dark'(d) { commit(() => { Root.teamDark = d.v === 'dark'; }); },
+    'unlink-team'(d) { commit(() => { S.links = (S.links || []).filter((x) => x.id !== d.v); const other = Root.teams.find((t) => t.id === d.v); if (other) other.links = (other.links || []).filter((x) => x.id !== S.id); }); },
+    'staff-role'(d) { commit(() => { const st = (S.staff || []).find((x) => x.id === d.id); if (!st) return; let r = rolesOf(st).slice(); r = r.includes(d.v) ? r.filter((x) => x !== d.v) : r.concat(d.v); if (d.v === 'head') r = r.filter((x) => x !== 'assistant'); if (d.v === 'assistant') r = r.filter((x) => x !== 'head'); st.roles = r; delete st.role; }); },
+    'staff-remove'(d) { commit(() => { const st = (S.staff || []).find((x) => x.id === d.id); S.staff = S.staff.filter((x) => x.id !== d.id); if (st && st.email && CloudLink && CloudLink.user && S.access && S.access.admin !== st.email) CloudLink.removeCoach(S.id, st.email); }); },
+    'add-person'(d) {
+      if (d.id.startsWith('rp:')) {
+        const [, tid, pid] = d.id.split(':'), t = Root.teams.find((x) => x.id === tid), src = t && t.players.find((x) => x.id === pid);
+        if (!src) return;
+        commit(() => { const per = personFor(src); per.teamId = per.teamId || tid; const { id, contacts, ...rest } = src; S.players.push(newPlayer(src.name, { ...rest, personId: per.id, contacts: (contacts || []).map((c) => ({ ...c, id: uid() })) })); searchHits = []; });
+        return;
+      }
+      const per = people()[d.id] || searchHits.find((x) => x.id === d.id); if (!per) return; commit(() => { people()[per.id] = people()[per.id] || per; S.players.push(newPlayer(per.name, { personId: per.id, nick: per.nickname || '', youth: !!per.youth })); searchHits = []; }); },
+    'edit-youth'() { commit(() => { const p = P(editing); p.youth = !p.youth; syncPerson(p); }); },
     'logo-remove'() { commit(() => { delete S.logo; delete S.palette; }); },
     'cap-ok'() { uiChange(() => { capNotice = null; }); },
     'cap-alarms'(d) { commit(() => { setRule('capAlarms', d.v === 'on'); }); if (d.v === 'on') beep([[660, 0.2]]); },
@@ -2060,9 +2606,34 @@ ${JSON.stringify(data)}`;
     stat(d) { const id = menu.id; menu = null; if (d.v === 'goal' && editIdx === null && !G().live.review) { addStats([{ t: 'goal', id }]); A.result({ v: 'us' }); return; } (editIdx !== null ? commit : commitLight)(() => addStats([{ t: d.v, id, ...(d.sub ? { sub: d.sub } : {}) }])); },
     'opp-pass'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'opppass' }])); },
     'opp-turn'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'oppturn' }])); },
+    'open-box'(d) { uiChange(() => { boxOpen = true; sheetOpen = false; tab = 'game'; pointsSource = d.v || 'current'; }); window.scrollTo(0, 0); },
+    'sheet-line'(d) {
+      const g = G(); if (!g || g.live) return;
+      const line = g.draft.line;
+      if (line[d.id]) { commit(() => { delete line[d.id]; }); return; }
+      if (placedIds().length >= targetSize()) { flash('The line is full. Take someone off first.'); return; }
+      commit(() => { place(d.id, bestPos(d.id)); });
+    },
+    'box-close'() { uiChange(() => { boxOpen = false; }); },
+    'open-sheet'(d) { uiChange(() => { sheetOpen = true; boxOpen = false; tab = 'game'; pointsSource = d.v || 'current'; }); window.scrollTo(0, 0); },
+    'sheet-close'() { uiChange(() => { sheetOpen = false; }); },
+    'reset-clock'() { const l = G().live; commitLight(() => { const now = Date.now(); l.startedAt = now; l.pausedAt = now; }); },
     pause() { const l = G().live; commitLight(() => { if (l.pausedAt) resume(l); else l.pausedAt = Date.now(); }); },
     'edit-prev'() { stopVoice(); uiChange(() => { editIdx = G().points.length - 1; sel = null; voice = null; }); },
     'edit-point'(d) { uiChange(() => { pointSheet = null; editIdx = Number(d.v); tab = 'game'; sel = null; voice = null; }); },
+    'pt-set'(d) { commit(() => { const p = activePt(); p[d.k] = d.v; }); },
+    'pt-insert'(d) {
+      stopVoice();
+      commit(() => {
+        const g = G(), i = editIdx, at = d.v === 'before' ? i : i + 1, prev = g.points[at - 1], next = g.points[at], near = prev || next;
+        const start = prev ? prev.endedAt : next.startedAt - 60000;
+        const pt = { lineup: near.lineup.slice(), roles: { ...(near.roles || {}) }, ratio: near.ratio, on: prev ? (prev.result === 'us' ? 'D' : 'O') : near.on, startedAt: start, endedAt: start + 60000, result: 'us', puller: null, avail: (near.avail || []).slice(), subs: [], events: [], inserted: true };
+        g.points.splice(at, 0, pt);
+        editIdx = at; sel = null; voice = null; fixLine = true;
+      });
+      flash('Point added. Set who was on, who scored, and its plays.');
+    },
+    'pt-delete'() { commit(() => { const g = G(); g.points.splice(editIdx, 1); if (!g.points.length) editIdx = null; else editIdx = Math.min(editIdx, g.points.length - 1); fixLine = false; }); },
     'edit-step'(d) { stopVoice(); uiChange(() => { editIdx += Number(d.d); voice = null; fixLine = false; sel = null; }); },
     'edit-done'() { stopVoice(); uiChange(() => { editIdx = null; voice = null; fixLine = false; sel = null; }); },
     'pt-view-all'() { stopVoice(); uiChange(() => { editIdx = null; voice = null; tab = 'time'; ptView = 'points'; pointsSource = 'current'; }); },
@@ -2112,6 +2683,7 @@ ${JSON.stringify(data)}`;
         let entry = S.schedule.find((x) => x.id === g.scheduleId);
         if (!entry) { const d = new Date(g.startedAt); entry = { id: uid(), date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, time: '', opponent: g.opponent, location: '' }; S.schedule.push(entry); }
         entry.gameId = g.id; entry.us = sc.us; entry.them = sc.them;
+        if (entry.fixtureId) comps().forEach((c) => { const m = (c.matchups || []).find((x) => x.id === entry.fixtureId); if (m && !m.result) { m.result = m.a.id === S.id ? { a: sc.us, b: sc.them } : { a: sc.them, b: sc.us }; resolvePlayoffs(c); touchComp(c); } });
         S.game = null; S.setup = null; sel = null; voice = null;
         if (subscribers().length) { sendFor = true; reportNote = ''; }
       });
@@ -2145,19 +2717,36 @@ ${JSON.stringify(data)}`;
     'open-player'(d) { uiChange(() => { navBack = { tab: 'players', ptView, pointsSource, playerOpen: null, y: window.scrollY }; playerOpen = d.id; }); window.scrollTo(0, 0); },
     'player-back'() { const b = navBack || { tab: 'players', ptView, pointsSource, playerOpen: null, y: 0 }; navBack = null; uiChange(() => { tab = b.tab; ptView = b.ptView; pointsSource = b.pointsSource; playerOpen = b.playerOpen; }); window.scrollTo(0, b.y || 0); },
     'close-player'() { uiChange(() => { playerOpen = null; }); },
-    'open-game-stats'(d) { uiChange(() => { tab = 'time'; ptView = 'stats'; pointsSource = d.v; }); },
+    'open-game-stats'(d) { uiChange(() => { tab = 'game'; boxOpen = true; sheetOpen = false; pointsSource = d.v; }); window.scrollTo(0, 0); },
     'open-mic'() {
       if (voice && voice.open) { openMic = false; voice.open = false; stopVoice(); voice.listening = false; voice.status = ''; render(); return; }
       openMic = true;
       startOpenMic();
     },
     'team-view'(d) { uiChange(() => { teamView = d.v; coachNote = ''; editingComp = null; }); },
-    'open-any'(d) { stopVoice(); commit(() => { Root.active = d.team; S = activeTeam(); sel = null; editIdx = null; voice = null; if (d.v === 'current') tab = 'game'; else { tab = 'time'; ptView = 'stats'; pointsSource = d.v; } }); },
+    'open-any'(d) { stopVoice(); commit(() => { Root.active = d.team; S = activeTeam(); sel = null; editIdx = null; voice = null; boxOpen = false; sheetOpen = false; if (d.v === 'current') tab = 'game'; else { tab = 'game'; boxOpen = true; pointsSource = d.v; } }); window.scrollTo(0, 0); },
     'any-start'(d) { commit(() => { Root.active = d.team; S = activeTeam(); const x = S.schedule.find((y) => y.id === d.id); S.setup = { opponent: x.opponent, startOn: 'O', out: rsvpOut(x.id), scheduleId: x.id, competitionId: x.competitionId || null, group: x.group || null, rules: { ...((x.competitionId && compOf(x.competitionId) || {}).rules || {}) } }; tab = 'game'; }); },
     'remove-coach'(d) { CloudLink.removeCoach(S.id, d.v); },
     'game-role'(d) { commit(() => { Root.gameRole = d.v; }); },
     'pt-view'(d) { uiChange(() => { ptView = d.v; }); },
     'combo-size'(d) { uiChange(() => { comboSize = d.v; }); },
+    'score-open'(d) {
+      uiChange(() => {
+        if (d.comp) { const c = compOf(d.comp), m = c.matchups.find((x) => x.id === d.id); scoreEntry = { comp: d.comp, id: d.id, names: [m.a.name, m.b.name], a: m.result ? m.result.a : null, b: m.result ? m.result.b : null, when: m.slot ? `${longDate(m.slot.date)} · ${ampm(m.slot.start)}` : m.label || '' }; return; }
+        const t = Root.teams.find((x) => x.id === d.team), x = t.schedule.find((y) => y.id === d.id);
+        scoreEntry = { team: d.team, id: d.id, names: [t.team, x.opponent || 'Opponent'], when: `${longDate(x.date)}${x.time ? ' · ' + x.time : ''}` };
+      });
+    },
+    'score-close'() { uiChange(() => { scoreEntry = null; }); },
+    'any-del'(d) {
+      const t = Root.teams.find((x) => x.id === d.team);
+      if (!t) return;
+      commit(() => {
+        if (d.kind === 'upcoming') { const x = t.schedule.find((y) => y.id === d.id); t.schedule = t.schedule.filter((y) => y.id !== d.id); if (x && x.fixtureId && CloudLink && CloudLink.user) CloudLink.unfixture(t, x); }
+        if (d.kind === 'done') { t.history = t.history.filter((h) => h.id !== d.id); t.schedule = t.schedule.filter((y) => y.gameId !== d.id); if (t.lastFinal === d.id) delete t.lastFinal; if (pointsSource === d.id) pointsSource = 'current'; }
+        if (d.kind === 'live' && t.game && t.game.id === d.id) { t.schedule.forEach((y) => { if (y.id === t.game.scheduleId) delete y.gameId; }); t.game = null; if (t === S) { editIdx = null; sel = null; } }
+      });
+    },
     'del-schedule'(d) {
       commit(() => {
         const x = S.schedule.find((y) => y.id === d.id);
@@ -2170,9 +2759,9 @@ ${JSON.stringify(data)}`;
     },
     'pick-scheduled'(d) { commit(() => { const x = S.schedule.find((y) => y.id === d.id), c = x.competitionId && compOf(x.competitionId); Object.assign(S.setup, { scheduleId: d.id, opponent: x.opponent, out: rsvpOut(d.id), competitionId: x.competitionId || null, group: x.group || null, rules: { ...(c ? c.rules : {}) } }); }); },
     'start-scheduled'(d) { commit(() => { const x = S.schedule.find((y) => y.id === d.id); S.setup = { opponent: x.opponent, startOn: 'O', out: rsvpOut(x.id), scheduleId: x.id, competitionId: x.competitionId || null, group: x.group || null, rules: { ...((x.competitionId && compOf(x.competitionId) || {}).rules || {}) } }; tab = 'game'; }); },
-    'create-game'() { uiChange(() => { tab = 'roster'; teamView = 'roster'; schedOpen = true; schedKind = 'game'; }); },
+    'create-game'() { uiChange(() => { tab = 'roster'; teamOpen = S.id; teamView = 'roster'; schedOpen = true; schedKind = 'game'; }); },
     'toggle-sub'(d) { commit(() => { const c = P(d.id).contacts.find((x) => x.id === d.v); c.subscribed = !c.subscribed; }); },
-    'del-contact'(d) { commit(() => { const p = P(editing); p.contacts = p.contacts.filter((x) => x.id !== d.v); }); },
+    'del-contact'(d) { commit(() => { const p = P(editing); p.contacts = p.contacts.filter((x) => x.id !== d.v); syncPerson(p); }); },
     'send-open'() { uiChange(() => { sendFor = true; reportNote = ''; }); },
     'send-close'() { uiChange(() => { sendFor = null; }); },
     async 'send-email'() {
@@ -2261,6 +2850,12 @@ ${JSON.stringify(data)}`;
     commit(() => { pt.events = E.reflow(flat); });
   }
   function beginDrag(id, x, y, el) {
+    if (id.startsWith('grip:')) {
+      const [, edge, mid] = id.split(':'), c = compOf(compView), m = c && (c.matchups || []).find((q) => q.id === mid);
+      if (!m) return;
+      const ghost = document.createElement('div'); ghost.className = 'ghost'; document.body.appendChild(ghost);
+      dragging = { id, grip: { edge, m, c }, ghost, el, zone: null }; hideTip(); moveDrag(x, y); return;
+    }
     if (id.startsWith('mu:')) {
       el.classList.add('dragged');
       const ghost = document.createElement('div'); ghost.className = 'ghost'; ghost.textContent = el.textContent.replace('✕', '').trim();
@@ -2304,6 +2899,33 @@ ${JSON.stringify(data)}`;
       return;
     }
     const under = document.elementFromPoint(x, y);
+    // Schedule board: light up every quarter hour the game would take.
+    document.querySelectorAll('.sched .span-on, .sched .span-bad').forEach((e) => e.classList.remove('span-on', 'span-bad'));
+    if (dragging.grip) {
+      const { edge, m, c } = dragging.grip, row = under && under.closest('tr[data-t]');
+      if (row) {
+        const t = HM(row.dataset.t), s = HM(m.slot.start), e = s + lenOf(c, m);
+        const ns = edge === 'top' ? Math.min(t, e - 30) : s, ne = edge === 'bottom' ? Math.max(t + 15, s + 30) : e;
+        dragging.grip.start = hm(ns); dragging.grip.len = ne - ns;
+        dragging.ghost.textContent = `${ampm(hm(ns))}–${ampm(hm(ne))} (${ne - ns} min)`;
+        // The game grows or shrinks on the board as you drag.
+        const box = dragging.el.closest('.mu'), td = box && box.closest('td'), rowAt = (t) => document.querySelector(`.sched tr[data-t="${hm(t)}"]`);
+        if (box && td) {
+          const base = td.getBoundingClientRect().top, top = rowAt(ns), last = rowAt(ne - 15);
+          if (top && last) { const lr = last.getBoundingClientRect(); box.style.top = `${top.getBoundingClientRect().top - base}px`; box.style.height = `${lr.bottom - top.getBoundingClientRect().top}px`; }
+          box.classList.toggle('bad', !!slotProblem(c, m, { ...m.slot, start: hm(ns) }, ne - ns)); box.classList.add('resizing');
+          const tx = box.querySelector('.mu-txt .small'); if (tx) tx.textContent = `${ampm(hm(ns))}–${ampm(hm(ne))}`;
+        }
+      }
+      dragging.under = under; return;
+    }
+    if (dragging.id && dragging.id.startsWith('mu:')) {
+      const cell = under && under.closest('td.slot[data-drop]'), c = compOf(compView), m = c && (c.matchups || []).find((q) => q.id === dragging.id.slice(3));
+      if (cell && m) {
+        const len = lenOf(c, m), t0 = HM(cell.dataset.t), why = slotProblem(c, m, { fieldId: cell.dataset.f, date: schedDate, start: cell.dataset.t });
+        document.querySelectorAll(`.sched td[data-f="${cell.dataset.f}"]`).forEach((td) => { const t = HM(td.dataset.t); if (t >= t0 && t < t0 + len) td.classList.add(why ? 'span-bad' : 'span-on'); });
+      }
+    }
     const zone = under && under.closest('[data-drop]');
     if (dragging.zone !== zone) {
       if (dragging.zone) dragging.zone.classList.remove('drop-on');
@@ -2323,7 +2945,9 @@ ${JSON.stringify(data)}`;
       return;
     }
     if (d.zone) d.zone.classList.remove('drop-on');
+    document.querySelectorAll('.sched .span-on, .sched .span-bad').forEach((e) => e.classList.remove('span-on', 'span-bad'));
     suppress();
+    if (d.grip) { if (apply && d.grip.len) placeMatchup(d.grip.m.id, d.grip.m.slot.fieldId, d.grip.start, d.grip.len); return; }
     if (apply && d.press && !d.moved && Date.now() - d.at >= 450) { openMenu(d.press, d.sx, d.sy); return; }
     if (!apply || !d.zone) return;
     if (d.id.startsWith('mu:')) { const z = d.zone.dataset.drop; if (z.startsWith('slot:')) { const [fid, t] = z.slice(5).split('|'); placeMatchup(d.id.slice(3), fid, t); } return; }
@@ -2384,7 +3008,7 @@ ${JSON.stringify(data)}`;
   root.addEventListener('change', (ev) => {
     const key = ev.target.dataset.c, v = ev.target.value, i = ev.target.dataset.i;
     if (key === 'setup-opp') commit(() => { S.setup.opponent = v; });
-    if (key === 'edit-name' && v.trim()) commit(() => { P(editing).name = v.trim(); });
+    if (key === 'edit-name' && v.trim()) commit(() => { P(editing).name = v.trim(); syncPerson(P(editing)); });
     if (key === 'edit-no') commit(() => { P(editing).no = v.trim(); });
     if (key === 'edit-alias') commit(() => { P(editing).aliases = v; });
     if (key === 'pt-time') {
@@ -2405,8 +3029,36 @@ ${JSON.stringify(data)}`;
     if (key === 'line-name' && v.trim()) commit(() => { const l = (S.lines || []).find((x) => x.id === ev.target.dataset.id); if (l) l.name = v.trim(); });
     if (key === 'comp-name' && v.trim()) commit(() => { const c = compOf(compView); c.name = v.trim(); touchComp(c); });
     if (key === 'sched-date') uiChange(() => { schedDate = v; muSel = null; });
+    if (key === 'sched-site') uiChange(() => { schedSite = v; });
+    if (key === 'sched-div') uiChange(() => { schedDiv = v; });
+    if (key === 'play-div') uiChange(() => { playDiv = v; });
+    if (key === 'po-src') commit(() => { const c = compOf(compView), m = c && c.matchups.find((x) => x.id === ev.target.dataset.id); if (!m || !m.src) return; m.src[ev.target.dataset.k] = parseSrc(v); resolvePlayoffs(c); touchComp(c); });
+    if (key === 'team-comp') uiChange(() => { teamComp = v; });
+    if (key === 'bk-label') commit(() => { const c = compOf(compView), m = c && c.matchups.find((x) => x.id === ev.target.dataset.id); if (m && v.trim()) { m.label = v.trim().slice(0, 40); resolvePlayoffs(c); touchComp(c); } bkRename = null; });
+    if (key === 'link-comp') uiChange(() => { if (linkDraft) linkDraft.comp = v; });
+    if (key === 'mu-playoff') commit(() => { const c = compOf(compView), m = c && c.matchups.find((x) => x.id === ev.target.dataset.id); if (m) { m.playoff = ev.target.checked; touchComp(c); } });
+    if (key === 'seed') commit(() => {
+      const c = compOf(compView), br = (c.brackets || []).find((b) => b.id === ev.target.dataset.b), i = Number(ev.target.dataset.i); if (!br) return;
+      const t = v ? (c.groups || []).flatMap((g) => g.teams || []).find((x) => x.id === v) : null;
+      br.seeds = br.seeds.map((x, j) => (j === i ? (t ? { id: t.id, name: t.name } : null) : x && t && x.id === t.id ? null : x));
+      resolvePlayoffs(c); touchComp(c);
+    });
+    if (key === 'ph-link' && v.trim()) { const id = ev.target.dataset.id, ref = teamRef(v); if (ref.id !== id) commit(() => { const t = allTeams().find((x) => x.id === id); phUpdate(id, { links: ((t && t.links) || []).filter((l) => l.id !== ref.id).concat(ref) }); const o = Root.teams.find((x) => x.id === ref.id); if (o && t) o.links = (o.links || []).filter((l) => l.id !== id).concat({ id, name: t.name }); }); }
     if (key === 'restore-file' && ev.target.files && ev.target.files[0]) { ev.target.files[0].text().then((txt) => { backupText = txt; A.restore(); }); }
-    if (key === 'team-color' && /^#[0-9a-f]{6}$/i.test(v)) commit(() => { S.color = v; });
+    if (key === 'team-color' && /^#[0-9a-f]{6}$/i.test(v)) commit(() => { S.color = v; if (S.palette && S.palette.length) S.palette[0] = v; });
+    if (key === 'pal' && /^#[0-9a-f]{6}$/i.test(v)) commit(() => { const i = Number(ev.target.dataset.i); S.palette = (S.palette && S.palette.length ? S.palette : [Report.safeColor(S.color)]).slice(); while (S.palette.length < i) S.palette.push('#888888'); S.palette[i] = v; if (i === 0) S.color = v; });
+    if (key === 'team-nick') commit(() => { S.nickname = v.trim(); });
+    if (key === 'ph-name' && v.trim()) commit(() => { phUpdate(ev.target.dataset.id, { name: v.trim() }); });
+    if (key === 'ph-nick') commit(() => { phUpdate(ev.target.dataset.id, { nick: v.trim() }); });
+    if (key === 'ph-pal' && /^#[0-9a-f]{6}$/i.test(v)) commit(() => { const id = ev.target.dataset.id, i = Number(ev.target.dataset.i), t = allTeams().find((x) => x.id === id), pal = (t.palette && t.palette.length ? t.palette : [Report.safeColor(t.color)]).slice(); while (pal.length < i) pal.push('#888888'); pal[i] = v; phUpdate(id, { palette: pal, color: pal[0] }); });
+    if (key === 'ph-logo' && ev.target.files && ev.target.files[0]) {
+      const id = ev.target.dataset.id, img = new Image(), url = URL.createObjectURL(ev.target.files[0]);
+      img.onload = () => { const size = 160, k = Math.min(size / img.width, size / img.height, 1), cv = document.createElement('canvas'); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url); const pal = paletteOf(cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data); commit(() => { phUpdate(id, { logo: cv.toDataURL('image/png'), ...(pal.length ? { palette: pal, color: pal[0] } : {}) }); }); };
+      img.src = url;
+    }
+    if (key === 'edit-nick') commit(() => { P(editing).nick = v.trim(); syncPerson(P(editing)); });
+    if (key === 'edit-email') commit(() => { const p = P(editing), per = personFor(p); per.email = v.trim().toLowerCase(); per.at = Date.now(); });
+    if (key === 'add-link') { const ref = teamRef(v); if (v.trim() && ref.id !== S.id) commit(() => { S.links = (S.links || []).filter((x) => x.id !== ref.id).concat(ref); const other = Root.teams.find((t) => t.id === ref.id); if (other) other.links = (other.links || []).filter((x) => x.id !== S.id).concat({ id: S.id, name: S.team }); }); }
     if (key === 'team-logo' && ev.target.files && ev.target.files[0]) {
       const img = new Image(), url = URL.createObjectURL(ev.target.files[0]);
       img.onload = () => {
@@ -2426,7 +3078,25 @@ ${JSON.stringify(data)}`;
   root.addEventListener('keydown', (ev) => {
     if (ev.target.id === 'voice-text' && voice && voice.open && ev.key === 'Enter') { ev.preventDefault(); heard(ev.target.value); }
   });
+  // As a name is typed, offer people who already have a player account.
+  let searchTimer = null;
+  function showHits(q) {
+    const box = document.getElementById('person-hits'); if (!box) return;
+    const low = q.toLowerCase(), onRoster = new Set(S.players.map((p) => p.personId));
+    const local = Object.values(people()).filter((x) => !x.role && x.name && x.name.toLowerCase().startsWith(low) && !onRoster.has(x.id) && (S.youth || !x.youth));
+    // Players already on another of this account's teams: youth teams see youth players, adult teams see adults.
+    Root.teams.filter((t) => t.id !== S.id).forEach((t) => t.players.forEach((p) => { if (p.name.toLowerCase().startsWith(low) && !(p.personId && onRoster.has(p.personId)) && !!(p.youth || t.youth) === !!S.youth && !local.some((x) => x.id === p.personId)) local.push({ id: `rp:${t.id}:${p.id}`, name: p.name, team: t.team }); }));
+    const all = [...new Map([...local, ...searchHits.filter((x) => x.name.toLowerCase().startsWith(low) && !onRoster.has(x.id))].map((x) => [x.id, x])).values()].slice(0, 6);
+    box.innerHTML = q.length < 2 || !all.length ? '' : `<span class="small muted">Existing accounts:</span> ${all.map((x) => `<button type="button" class="btn small-btn" data-a="add-person" data-id="${x.id}">${esc(x.name)}${x.team ? ` <span class="small muted">${esc(x.team)}</span>` : x.email ? '' : ' <span class="small muted">(placeholder)</span>'}</button>`).join('')}`;
+  }
   root.addEventListener('input', (ev) => {
+    if (ev.target.dataset.input === 'team-q') { teamQuery = ev.target.value; render(); return; }
+    if (ev.target.dataset.input === 'person-search') {
+      const q = ev.target.value.split(',').pop().trim();
+      showHits(q);
+      clearTimeout(searchTimer);
+      if (q.length >= 2 && CloudLink && CloudLink.user && !S.youth) searchTimer = setTimeout(async () => { searchHits = await CloudLink.searchPeople(q); showHits(q); }, 350);
+    }
     if (ev.target.dataset.c === 'backup-text') backupText = ev.target.value;
     if (reporting && (ev.target.dataset.c === 'rs-us' || ev.target.dataset.c === 'rs-them')) reporting[ev.target.dataset.c.slice(3)] = ev.target.value;
     if (ev.target.dataset.c === 'voice' && voice) { voice.text = ev.target.value; refreshVoice(); }
@@ -2442,11 +3112,39 @@ ${JSON.stringify(data)}`;
     const form = ev.target.dataset.form;
     if (form === 'add') {
       const names = document.getElementById('add-name').value.split(',').map((s) => s.trim()).filter(Boolean);
-      if (names.length) commit(() => { names.forEach((n) => S.players.push(newPlayer(n))); });
+      if (names.length) commit(() => { names.forEach((n) => { const p = newPlayer(n, { youth: !!S.youth }); S.players.push(p); syncPerson(p); }); searchHits = []; });
+    }
+    if (form === 'staff') {
+      const name = document.getElementById('staff-name').value.trim(), email = document.getElementById('staff-email').value.trim().toLowerCase(), role = document.getElementById('staff-role').value;
+      if (!name && !email.includes('@')) return;
+      commit(() => {
+        const per = (email && personByEmail(email)) || newPerson({ role: 'staff', name: name || email, email: email.includes('@') ? email : '' });
+        S.staff = (S.staff || []).filter((x) => !(email && x.email === email)).concat({ id: uid(), personId: per.id, name: name || per.name, email: email.includes('@') ? email : '', roles: [role] });
+        if (email.includes('@') && CloudLink && CloudLink.user && S.access && !S.access.coaches.includes(email)) CloudLink.addCoach(S.id, email);
+        coachNote = email.includes('@') ? `${name || email} can sign in with ${email} to open this team.` : '';
+      });
     }
     if (form === 'coach') {
       const email = document.getElementById('coach-email').value.trim().toLowerCase();
       if (email.includes('@')) { coachNote = `${email} can now open this team by signing in with that Google account. Send them ${window.location.protocol === 'https:' && !window.location.hostname.includes('localhost') ? window.location.href.split('#')[0] : 'the app link'}.`; CloudLink.addCoach(S.id, email); render(); }
+    }
+    if (form === 'final-score') {
+      const sa = Number(document.getElementById('fs-a').value), sb = Number(document.getElementById('fs-b').value), s = scoreEntry;
+      if (!Number.isFinite(sa) || !Number.isFinite(sb)) return;
+      commit(() => {
+        if (s.comp) {
+          const c = compOf(s.comp), m = c.matchups.find((x) => x.id === s.id);
+          m.result = { a: sa, b: sb }; touchComp(c);
+          // Our own teams in the matchup get the final on their schedules.
+          [[m.a, sa, sb], [m.b, sb, sa]].forEach(([tm, us, them]) => { const t = Root.teams.find((x) => x.id === tm.id), x = t && t.schedule.find((y) => y.fixtureId === m.id); if (x && !x.gameId) reportFinal(t, x, us, them); });
+          if (m.slot && CloudLink && CloudLink.user) CloudLink.leagueFixture(m.id, { ...fixtureOf(c, m), final: { [m.a.id]: sa, [m.b.id]: sb } });
+          resolvePlayoffs(c);
+        } else {
+          const t = Root.teams.find((x) => x.id === s.team), x = t.schedule.find((y) => y.id === s.id);
+          if (x && !x.gameId) reportFinal(t, x, sa, sb);
+        }
+        scoreEntry = null;
+      });
     }
     if (form === 'report-score') {
       const x = S.schedule.find((y) => y.id === ev.target.dataset.id), us = Number(document.getElementById('rs-us').value), them = Number(document.getElementById('rs-them').value);
@@ -2464,16 +3162,61 @@ ${JSON.stringify(data)}`;
     if (form === 'comp-group') { const name = document.getElementById('comp-group').value.trim(); if (name) commit(() => { const c = compOf(compView); if (!c.groups.some((g) => g.name === name)) c.groups.push({ name, teams: [] }); touchComp(c); }); }
     if (form === 'comp-team') { const gi = Number(ev.target.dataset.i), name = document.getElementById(`comp-team-${gi}`).value.trim(); if (name) commit(() => { const c = compOf(compView), ref = teamRef(name); if (c.groups.some((g) => g.teams.some((t) => t.id === ref.id))) { flash(`${ref.name} is already in this competition.`); return; } c.groups[gi].teams.push(ref); touchComp(c); }); }
     if (form === 'site') { const name = ev.target.elements.name.value.trim(); if (name) commit(() => { const c = compOf(compView); c.sites = c.sites || []; c.sites.push({ id: uid(), name, fields: [] }); touchComp(c); }); }
-    if (form === 'field') { const name = ev.target.elements.name.value.trim(); if (name) commit(() => { const c = compOf(compView), s = c.sites.find((x) => x.id === ev.target.dataset.s); s.fields.push({ id: uid(), name, lat: null, lng: null, address: '', hours: [] }); touchComp(c); }); }
+    if (form === 'field') { const names = ev.target.elements.name.value.split(',').map((x) => x.trim()).filter(Boolean); if (names.length) commit(() => { const c = compOf(compView), s = c.sites.find((x) => x.id === ev.target.dataset.s); names.forEach((name) => { if (!s.fields.some((f) => f.name.toLowerCase() === name.toLowerCase())) s.fields.push({ id: uid(), name, lat: null, lng: null, address: '' }); }); touchComp(c); }); }
     if (form === 'hours') {
       const el = ev.target.elements, days = [0, 1, 2, 3, 4, 5, 6].filter((i) => el['d' + i].checked);
       if (!days.length) { flash('Pick at least one day.'); return; }
       if (el.start.value >= el.end.value || !el.from.value || !el.to.value || el.from.value > el.to.value) { flash('Check the times and dates.'); return; }
-      commit(() => { const c = compOf(compView), f = c.sites.find((x) => x.id === ev.target.dataset.s).fields.find((x) => x.id === ev.target.dataset.f); f.hours = f.hours || []; f.hours.push({ days, start: el.start.value, end: el.end.value, from: el.from.value, to: el.to.value }); touchComp(c); });
+      commit(() => { const c = compOf(compView), s = c.sites.find((x) => x.id === ev.target.dataset.s); s.hours = siteHours(s).slice(); s.hours.push({ days, start: el.start.value, end: el.end.value, from: el.from.value, to: el.to.value }); (s.fields || []).forEach((f) => { delete f.hours; }); touchComp(c); });
+    }
+    if (form === 'bracket') {
+      const el = ev.target.elements, n = Number(el.n.value);
+      if (!(n >= 3 && n <= 12)) { flash('A bracket takes 3 to 12 teams.'); return; }
+      commit(() => { const c = compOf(compView); makeBracket(c, el.name.value.trim() || 'Playoffs', el.group ? el.group.value : '', n); touchComp(c); });
+    }
+    if (form === 'po-game') {
+      const el = ev.target.elements, a = parseSrc(el.a.value), b = parseSrc(el.b.value);
+      if (!a || !b || el.a.value === el.b.value) { flash('Pick two different sides.'); return; }
+      commit(() => { const c = compOf(compView), m = addPlayoffGame(c, null, 0, a, b); m.group = playDiv !== 'all' ? playDiv : ''; resolvePlayoffs(c); touchComp(c); });
+    }
+    if (form === 'league-link') {
+      const el = ev.target.elements, d = linkDraft, t = d && Root.teams.find((x) => x.id === d.team), h = t && t.history.find((x) => x.id === d.id);
+      const c = d && ((d.comp && compOf(d.comp)) || comps().filter(isCompAdmin)[0]);
+      if (!t || !h || !c) return;
+      commit(() => {
+        if (!(c.groups || []).length) c.groups = [{ name: c.kind === 'tournament' ? 'Pool A' : 'Division 1', teams: [] }];
+        const grp = c.groups.find((g) => el.group && g.name === el.group.value) || c.groups[0];
+        if (!teamInComp(c, t.id)) grp.teams.push({ id: t.id, name: t.team });
+        let opp;
+        if (el.opp.value === '__new') { opp = teamRef(h.opponent || 'Opponent'); if (opp.id === t.id) opp = teamRef(`${h.opponent || 'Opponent'} (opponent)`); if (!teamInComp(c, opp.id)) grp.teams.push({ ...opp }); }
+        else { const o = c.groups.flatMap((g) => g.teams || []).find((x) => x.id === el.opp.value); opp = { id: o.id, name: o.name }; }
+        const m = { id: uid(), group: grp.name, a: { id: t.id, name: t.team }, b: { ...opp }, slot: null, linked: true, date: localDay(new Date(h.date)), result: { a: h.us, b: h.them }, ...(el.playoff.checked ? { playoff: true } : {}) };
+        c.matchups = c.matchups || []; c.matchups.push(m);
+        Object.assign(h, { competitionId: c.id, group: grp.name, matchupId: m.id, opponent: opp.name });
+        const x = t.schedule.find((y) => y.gameId === h.id);
+        if (x) Object.assign(x, { fixtureId: m.id, competitionId: c.id, group: grp.name, oppTeamId: opp.id, opponent: opp.name });
+        touchComp(c); linkDraft = null;
+      });
+    }
+    if (form === 'team-admin') {
+      const email = ev.target.elements.email.value.trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { flash('Enter their email address.'); return; }
+      commit(() => {
+        const t = adoptTeam(ev.target.dataset.id); if (!t) return;
+        const per = personByEmail(email) || newPerson({ role: 'staff', name: email, email, teamId: t.id });
+        t.staff = [{ id: uid(), personId: per.id, name: per.name || email, email, roles: ['admin'] }];
+        Root.active = t.id; S = t; teamOpen = t.id; teamView = 'coaches';
+        coachNote = `${email} is now team admin. They sign in with that Google account to run ${t.team}.`;
+      });
+    }
+    if (form === 'team-merge') {
+      const from = ev.target.dataset.id, to = allTeams().find((x) => x.id === ev.target.elements.to.value);
+      if (!to || to.id === from) return;
+      commit(() => { mergeTeamRefs(from, to); teamOpen = to.id; });
     }
     if (form === 'matchup') {
       const gi = Number(ev.target.dataset.i), el = ev.target.elements;
-      commit(() => { const c = compOf(compView), g = c.groups[gi], x = g.teams[Number(el.a.value)], y = g.teams[Number(el.b.value)]; if (!x || !y || x.id === y.id) { flash('Pick two different teams.'); return; } c.matchups = c.matchups || []; c.matchups.push({ id: uid(), group: g.name, a: { ...x }, b: { ...y }, slot: null }); touchComp(c); });
+      commit(() => { const c = compOf(compView), g = c.groups[gi], x = g.teams[Number(el.a.value)], y = g.teams[Number(el.b.value)]; if (!x || !y || x.id === y.id) { flash('Pick two different teams.'); return; } c.matchups = c.matchups || []; c.matchups.push({ id: uid(), group: g.name, a: { ...x }, b: { ...y }, slot: null, ...(el.playoff.checked ? { playoff: true } : {}) }); touchComp(c); });
     }
     if (form === 'schedule-edit') {
       const x = S.schedule.find((y) => y.id === ev.target.dataset.id);
@@ -2492,11 +3235,11 @@ ${JSON.stringify(data)}`;
     }
     if (form === 'contact') {
       const email = document.getElementById('c-email').value.trim();
-      if (email.includes('@')) commit(() => { const p = P(editing); p.contacts = p.contacts || []; p.contacts.push({ id: uid(), name: document.getElementById('c-name').value.trim(), email, relation: document.getElementById('c-rel').value, subscribed: true }); });
+      if (email.includes('@')) commit(() => { const p = P(editing); p.contacts = p.contacts || []; p.contacts.push({ id: uid(), name: document.getElementById('c-name').value.trim(), email, relation: document.getElementById('c-rel').value, subscribed: true }); syncPerson(p); });
     }
     if (form === 'team') {
       const name = document.getElementById('new-team').value.trim();
-      if (name) commit(() => { const t = blank(JSON.parse(JSON.stringify(S.rules)), name); Root.teams.push(t); Root.active = t.id; S = t; sel = null; });
+      if (name) commit(() => { const t = blank(JSON.parse(JSON.stringify(S.rules)), name); Root.teams.push(t); Root.active = t.id; S = t; sel = null; teamOpen = t.id; teamView = 'roster'; });
     }
     if (form === 'tag') {
       const t = document.getElementById('new-tag').value.trim();
@@ -2515,7 +3258,7 @@ ${JSON.stringify(data)}`;
     const auth = firebase.auth(), fs = firebase.firestore();
     fs.enablePersistence({ synchronizeTabs: true }).catch(() => { /* another tab holds it; sync still works */ });
     const known = new Set(), listeners = new Map(), rsvpListeners = new Map(), fixtureListeners = new Map();
-    let stopComps = null;
+    let stopComps = null, god = false;
     let castTimer = null;
     let user = null, stopTeams = null, ready = false, timer = null, status = '', problem = '', plug = null;
     const native = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
@@ -2550,7 +3293,7 @@ ${JSON.stringify(data)}`;
     function flush() {
       if (!user || !ready) return;
       Root.teams.filter((t) => !t.isExample && !t.access).forEach((t) => {
-        t.access = { admin: email(), coaches: [email()], name: t.team };
+        t.access = { admin: email(), coaches: [...new Set([email(), ...(t.staff || []).map((st) => st.email).filter(Boolean)])], name: t.team };
         teams().doc(t.id).set(t.access).catch(fail);
         listenTeam(t.id);
       });
@@ -2558,6 +3301,7 @@ ${JSON.stringify(data)}`;
       syncRsvp();
       syncDirectory();
       syncComps();
+      syncPeople();
       syncCast();
       const { writes, deletes } = Cloud.outgoing(Root, known, Date.now());
       if (!writes.length && !deletes.length) { persist(); return; }
@@ -2569,6 +3313,31 @@ ${JSON.stringify(data)}`;
         batch.commit().catch(fail);
       }
       deletes.filter((id) => id.startsWith('t_')).forEach((id) => { const tid = id.slice(2); stopTeam(tid); teams().doc(tid).delete().catch(fail); });
+    }
+    // People: placeholders until the person signs in with that email, then theirs.
+    const peopleHash = {};
+    function syncPeople() {
+      Root.teams.forEach((t) => t.players.forEach((p) => { if (p.personId && people()[p.personId] && !people()[p.personId].teamId) people()[p.personId].teamId = t.id; }));
+      Object.values(people()).forEach((per) => {
+        if (!per.createdBy) per.createdBy = email();
+        const rec = { role: per.role || '', name: per.name || '', nameLower: (per.name || '').toLowerCase(), nickname: per.nickname || '', email: per.email || '', youth: !!per.youth, guardians: per.guardians || [], uid: per.uid || '', teamId: per.teamId || 'none', createdBy: per.createdBy, at: per.at || 0 };
+        const h = Cloud.hash(JSON.stringify(rec));
+        if (peopleHash[per.id] === h || per.syncedHash === h) return;
+        peopleHash[per.id] = h; per.syncedHash = h;
+        fs.collection('people').doc(per.id).set(rec, { merge: true }).catch(() => { peopleHash[per.id] = null; per.syncedHash = null; });
+        // Only adult players are searchable by name; youth players never appear in the index.
+        const idx = fs.collection('playerIndex').doc(per.id);
+        if (!rec.youth && !rec.role && rec.name) idx.set({ name: rec.name, nameLower: rec.nameLower, createdBy: rec.createdBy }).catch(() => {}); else idx.delete().catch(() => {});
+      });
+    }
+    function takePerson(d) { const v = d.data(), cur = people()[d.id]; if (cur && (cur.at || 0) >= (v.at || 0)) return false; people()[d.id] = { id: d.id, ...v, syncedHash: null }; return true; }
+    function listenPeople() {
+      const me = email();
+      [['createdBy', '=='], ['email', '=='], ['guardians', 'array-contains']].forEach(([f, op]) => fs.collection('people').where(f, op, me).onSnapshot((snap) => {
+        let changed = false;
+        snap.docs.forEach((d) => { if (takePerson(d)) changed = true; if (f === 'email' && !d.data().uid) { fs.collection('people').doc(d.id).update({ uid: user.uid, at: Date.now() }).catch(() => {}); } });
+        if (changed) { persist(); if (!dragging) render(); }
+      }, () => { /* rules not published yet */ }));
     }
     // Competitions live in their own records, edited by their admins.
     const compJson = (c) => { const { syncHash, readOnly, ...rest } = c; return JSON.stringify(rest); };
@@ -2584,7 +3353,7 @@ ${JSON.stringify(data)}`;
     }
     function listenComps() {
       if (stopComps) stopComps();
-      stopComps = fs.collection('competitions').where('admins', 'array-contains', email()).onSnapshot((snap) => {
+      stopComps = (god ? fs.collection('competitions') : fs.collection('competitions').where('admins', 'array-contains', email())).onSnapshot((snap) => {
         let changed = false;
         snap.docChanges().forEach((ch) => {
           if (ch.type === 'removed') { Root.competitions = comps().filter((c) => c.id !== ch.doc.id); changed = true; return; }
@@ -2627,6 +3396,7 @@ ${JSON.stringify(data)}`;
           if (f.cancelled) { if (x && !x.gameId) { t.schedule = t.schedule.filter((y) => y !== x); changed = true; } return; }
           if (!x) { if (f.removed && f.removed[t.id]) return; t.schedule.push({ id: uid(), fixtureId: d.id, oppTeamId: other, kind: 'game', fixtureAt: f.at, ...want }); changed = true; return; }
           if (!x.gameId && (f.at || 0) > (x.fixtureAt || 0)) { Object.assign(x, want); x.fixtureAt = f.at; changed = true; }
+          if (!x.gameId && f.final && f.final[t.id] != null) { reportFinal(t, x, f.final[t.id], f.final[other]); changed = true; }
         });
         if (changed) settle();
       }, () => { /* rules not published yet */ }));
@@ -2646,7 +3416,7 @@ ${JSON.stringify(data)}`;
         if (g) {
           const sc = E.score(g), pt = g.live, entry = t.schedule.find((x) => x.id === g.scheduleId);
           const r = g.ruleOverride ? { ...t.rules, ...g.ruleOverride } : t.rules;
-          state = { live: true, team: t.team, color: Report.safeColor(t.color), opponent: g.opponent || 'Opponent', fixtureId: entry && entry.fixtureId || null, us: sc.us, them: sc.them, gameStartedAt: g.startedAt, caps: { soft: r.softCap || 0, hard: r.hardCap || 0, time: r.timeCap || 0 }, gameTo: g.capTo || r.gameTo,
+          state = { live: true, team: t.team, color: Report.safeColor(t.color), opponent: g.opponent || 'Opponent', fixtureId: entry && entry.fixtureId || null, us: sc.us, them: sc.them, gameStartedAt: capStart(g, t), caps: { soft: r.softCap || 0, hard: r.hardCap || 0, time: r.timeCap || 0 }, gameTo: g.capTo || r.gameTo,
             point: pt ? { n: g.points.length + 1, on: pt.on, startedAt: pt.startedAt, pausedAt: pt.pausedAt || null, review: pt.review ? pt.review.result : null, puller: pt.puller || null, onField: [...new Set(pt.lineup.concat((pt.subs || []).map((s) => s.in)))].filter((id) => !(pt.subs || []).some((s) => s.out === id && !pt.lineup.includes(id))).map(who).filter(Boolean), events: (pt.events || []).filter((e) => !e.auto).map((e) => ({ t: e.t, id: e.id || null, sub: e.sub || null, x: e.x === undefined ? null : e.x, y: e.y === undefined ? null : e.y })) } : null,
             players: Object.fromEntries(t.players.map((p) => [p.id, { no: p.no || '', name: p.name }])),
             recent: g.points.slice(-6).map((p, i, arr) => { const goal = (p.events || []).find((e) => e.t === 'goal'), ast = (p.events || []).find((e) => e.t === 'assist'); return { n: g.points.length - arr.length + i + 1, result: p.result, on: p.on, scorer: goal ? who(goal.id) : null, assist: ast ? who(ast.id) : null, ms: p.endedAt - p.startedAt }; }) };
@@ -2688,7 +3458,7 @@ ${JSON.stringify(data)}`;
     }
     function listen() {
       ready = false;
-      stopTeams = teams().where('coaches', 'array-contains', email()).onSnapshot({ includeMetadataChanges: true }, async (snap) => {
+      stopTeams = (god ? teams() : teams().where('coaches', 'array-contains', email())).onSnapshot({ includeMetadataChanges: true }, async (snap) => {
         const ids = new Set();
         let changed = false;
         snap.forEach((d) => {
@@ -2702,7 +3472,7 @@ ${JSON.stringify(data)}`;
         if (!snap.metadata.fromCache) {
           Root.teams.filter((t) => t.access && !ids.has(t.id) && !snap.metadata.hasPendingWrites).forEach((t) => { stopTeam(t.id); Root.teams = Root.teams.filter((x) => x !== t); changed = true; });
         }
-        if (!ready) { await migrate(); ready = true; flush(); loadDirectory(); listenComps(); changed = true; }
+        if (!ready) { await migrate(); ready = true; flush(); loadDirectory(); listenComps(); listenPeople(); changed = true; }
         problem = '';
         if (changed) settle();
       }, (e) => { problem = `Sync stopped: ${e.message}`; if (!dragging) render(); });
@@ -2713,17 +3483,33 @@ ${JSON.stringify(data)}`;
       rsvpListeners.forEach((x) => x.stop()); rsvpListeners.clear();
       fixtureListeners.forEach((stop) => stop()); fixtureListeners.clear();
       if (stopComps) { stopComps(); stopComps = null; }
-      known.clear(); ready = false; user = u; status = '';
-      if (u) listen();
+      known.clear(); ready = false; user = u; status = ''; god = false;
+      // Superuser access exists only if the project owner made a record for this email in the gods collection.
+      if (u) fs.collection('gods').doc((u.email || '').toLowerCase()).get().then((d) => { god = d.exists; }).catch(() => { god = false; }).finally(listen);
       if (S) render();
     });
     return {
       get user() { return user; },
+      get god() { return god; },
+      resync() {
+        Root.teams.forEach((t) => { delete t.syncHash; delete t.syncAt; delete t.rsvpHash; delete t.castHash; delete t.dirHash; });
+        comps().forEach((c) => { delete c.syncHash; });
+        Object.values(people()).forEach((p) => { delete p.syncedHash; });
+        Object.keys(peopleHash).forEach((k) => { delete peopleHash[k]; });
+        known.clear(); flush(); listenComps();
+      },
+      reconcileFixtures(compId, keep) {
+        fs.collection('fixtures').where('competitionId', '==', compId).get().then((snap) => snap.forEach((d) => { if (!keep.includes(d.id) && !d.data().cancelled) d.ref.set({ cancelled: true, at: Date.now() }, { merge: true }).catch(() => {}); })).catch(() => {});
+      },
       get status() { return status; },
       get problem() { return problem; },
       schedule() { clearTimeout(timer); timer = setTimeout(flush, 1500); },
       castSoon() { clearTimeout(castTimer); castTimer = setTimeout(() => { if (user && ready) syncCast(); }, 900); },
       fixture(t, x) { makeFixture(t, x); },
+      async searchPeople(q) {
+        const low = q.toLowerCase();
+        try { const snap = await fs.collection('playerIndex').where('nameLower', '>=', low).where('nameLower', '<=', low + '\uf8ff').limit(8).get(); return snap.docs.map((d) => ({ id: d.id, name: d.data().name, createdBy: d.data().createdBy, email: '', youth: false, guardians: [] })); } catch (e) { return []; }
+      },
       leagueFixture(id, fx) { fs.collection('fixtures').doc(id).set(fx).catch(fail); },
       deleteComp(id) { fs.collection('competitions').doc(id).delete().catch(fail); },
       unfixture(t, x) { fs.collection('fixtures').doc(x.fixtureId).set({ removed: { [t.id]: true } }, { merge: true }).catch(() => {}); },
