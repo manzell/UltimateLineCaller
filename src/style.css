@@ -704,3 +704,5 @@ input.bk-label { width: 9em; padding: 2px 6px; font: inherit; font-weight: 700; 
 :root[data-scheme="press"] .fb { filter: grayscale(1) contrast(1.2); border-radius: 0; }
 .ss thead th.ss-next, .ss td.ss-next { width: 46px; min-width: 46px; }
 .ss td.ss-next button:not([aria-pressed="true"]):not(:disabled)::after { content: '+'; color: var(--muted); opacity: .6; }
+.btn.go-alt { width: 100%; min-height: 44px; background: transparent; border: 1px dashed var(--line); color: var(--muted); }
+.timer.untimed { color: var(--muted); font-size: 1.6rem; }

@@ -419,7 +419,7 @@
           ${line && line.warnings.length ? `<div class="warns" role="status"><b>Check this line</b>${line.warnings.map((w) => `<span>${esc(gWords(w))}</span>`).join('')}</div>` : ''}
         </section>
         ${role() === 'events' ? '' : suggestionPanel()}
-        <div class="sticky-go">${selectionBar()}<button type="button" class="btn go" data-a="start-point" ${missing || !ids.length ? 'disabled' : ''}>${!target ? 'No players available' : missing ? `Pick ${missing} more` : 'Start point'}</button></div>
+        <div class="sticky-go">${selectionBar()}<button type="button" class="btn go" data-a="start-point" ${missing || !ids.length ? 'disabled' : ''}>${!target ? 'No players available' : missing ? `Pick ${missing} more` : 'Start point'}</button>${!missing && ids.length ? '<button type="button" class="btn go-alt" data-a="start-point" data-untimed="1" title="For points entered after the fact, or when nobody is running the clock">Untimed point</button>' : ''}</div>
       </div>
       <section class="panel" aria-label="Bench" data-drop="bench">
         <div class="panel-head"><h2>Bench</h2><span class="small muted">Most owed first. Tap to add, or drag.</span></div>
@@ -468,10 +468,15 @@
   function linesLive() {
     const g = G(), pv = getPreviews(), onField = liveOnField().filter(P);
     return `${scoreboard(true)}<div class="game">
-      <section class="panel"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div>
+      <section class="panel"><div class="timer ${g.live.pausedAt ? 'paused' : ''} ${g.live.untimed ? 'untimed' : ''}" id="timer">${g.live.untimed ? 'Untimed' : clock(liveElapsed())}</div>
         ${g.live.review ? `<div class="warns"><b>${g.live.review.result === 'us' ? 'We scored' : 'They scored'}</b><span>Waiting for the point to be finalized.</span></div>` : ''}
         <div class="label">On the field</div><div class="compact">${onField.map((id) => `<div>${freshTile(P(id))}<span class="cn">${nameTag(P(id))}</span></div>`).join('')}</div></section>
       <section class="panel"><div class="panel-head"><h2>Next up</h2>${modeSeg(true)}</div><div class="next-cols">${compactLine(pv.us, 'If we score')}${compactLine(pv.them, 'If they score')}</div></section></div>`;
+  }
+  // When we have the disc: our turnover. When they do: their pass or turnover.
+  function turnBtns(pt, review) {
+    if (Report.holder(pt) === 'us') return '<button type="button" class="btn small-btn" data-a="our-turn">Our turnover</button>';
+    return `${review ? '' : '<button type="button" class="btn small-btn opp" data-a="opp-pass">Opponent pass</button>'}<button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button>`;
   }
   function liveScreen() {
     if (role() === 'lines') return linesLive();
@@ -480,7 +485,7 @@
     return `${scoreboard(true)}
     <div class="game">
       <section class="panel">
-        <div class="live-top"><div class="timer-wrap"><div class="timer ${g.live.pausedAt ? 'paused' : ''}" id="timer">${clock(liveElapsed())}</div>${g.live.review ? '' : `<button type="button" class="btn small-btn" data-a="pause">${g.live.pausedAt ? 'Resume' : 'Pause'}</button>${g.live.pausedAt ? twoTap('reset-clock', 'reset-clock', 'Reset', 'Tap again: back to 0:00') : ''}`}</div>
+        <div class="live-top"><div class="timer-wrap"><div class="timer ${g.live.pausedAt ? 'paused' : ''} ${g.live.untimed ? 'untimed' : ''}" id="timer">${g.live.untimed ? 'Untimed' : clock(liveElapsed())}</div>${g.live.review || g.live.untimed ? '' : `<button type="button" class="btn small-btn" data-a="pause">${g.live.pausedAt ? 'Resume' : 'Pause'}</button>${g.live.pausedAt ? twoTap('reset-clock', 'reset-clock', 'Reset', 'Tap again: back to 0:00') : ''}`}</div>
         ${g.live.review
           ? `<div class="review"><div><h3>${g.live.review.result === 'us' ? 'We scored' : 'They scored'}</h3><p class="small muted">Check the play and the lineup, then finalize.</p></div><div class="chips"><button type="button" class="btn small-btn" data-a="keep-playing">Keep playing</button><button type="button" class="btn primary" data-a="finalize">Finalize point</button></div></div>`
           : '<div class="score-btns"><button type="button" class="btn primary" data-a="result" data-v="us">We scored</button><button type="button" class="btn" data-a="result" data-v="them">They scored</button></div>'}</div>
@@ -492,7 +497,7 @@
         ${Root.entryMode === 'field' && !g.live.review ? entryField() : ''}
         <div class="panel-head"><span class="label">On the field</span>${legend()}${energyKey}<span class="right"><button type="button" class="btn small-btn" data-a="entry-mode" data-v="${Root.entryMode === 'field' ? 'list' : 'field'}">${Root.entryMode === 'field' ? 'Hide field' : 'Field view'}</button></span></div>
         <div class="cards">${onField.map(fieldCard).join('')}</div>
-        <div class="panel-foot"><span class="chips">${twoTap('cancel-pt', 'cancel-point', 'Cancel this point', 'Tap again to cancel')}<button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><span class="chips">${!g.live.review && Report.holder(g.live) === 'them' ? '<button type="button" class="btn small-btn opp" data-a="opp-pass">Opponent pass</button>' : ''}<button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></span></div>
+        <div class="panel-foot"><span class="chips">${twoTap('cancel-pt', 'cancel-point', 'Cancel this point', 'Tap again to cancel')}<button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button></span><span class="chips">${turnBtns(g.live, !!g.live.review)}</span></div>
       </section>
       <section class="panel" data-drop="none">
         ${role() === 'events' ? '' : `<div class="panel-head"><h2>Next up</h2>${modeSeg(true)}</div>
@@ -519,7 +524,7 @@
       <div class="panel-head"><span class="label">On the field</span>${legend()}</div>
       <div class="cards">${onField.map(fieldCard).join('')}</div>
       ${fixLine ? `<div class="label">Not on the field</div><div class="list">${S.players.filter((x) => !onField.includes(x.id)).map((x) => benchRow(x.id, true)).join('')}</div>` : ''}
-      <div class="panel-foot"><span class="chips"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button><button type="button" class="btn small-btn" data-a="pt-insert" data-v="before">Insert point before</button><button type="button" class="btn small-btn" data-a="pt-insert" data-v="after">Insert point after</button>${twoTap('ptdel-' + i, 'pt-delete', 'Delete point', 'Tap again', 'danger')}</span><span class="chips"><button type="button" class="btn small-btn opp" data-a="opp-pass">Opponent pass</button><button type="button" class="btn small-btn opp" data-a="opp-turn">Opponent turnover</button></span></div>
+      <div class="panel-foot"><span class="chips"><button type="button" class="btn small-btn" data-a="pt-view-all">All points</button><button type="button" class="btn small-btn" data-a="fix-line">${fixLine ? 'Done fixing' : 'Fix lineup'}</button><button type="button" class="btn small-btn" data-a="pt-insert" data-v="before">Insert point before</button><button type="button" class="btn small-btn" data-a="pt-insert" data-v="after">Insert point after</button>${twoTap('ptdel-' + i, 'pt-delete', 'Delete point', 'Tap again', 'danger')}</span><span class="chips">${turnBtns(p, false)}</span></div>
     </section>`;
   }
 
@@ -2125,7 +2130,7 @@ ${JSON.stringify(data)}`;
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wake(); });
   setInterval(() => {
-    const el = document.getElementById('timer'); if (el && S.game && S.game.live) el.textContent = clock(liveElapsed());
+    const el = document.getElementById('timer'); if (el && S.game && S.game.live && !S.game.live.untimed) el.textContent = clock(liveElapsed());
     const gc = document.getElementById('gclock'); if (gc && S.game) gc.textContent = capClock(S.game);
     capCheck();
   }, 500);
@@ -2408,12 +2413,12 @@ ${JSON.stringify(data)}`;
       commit(() => place(d.id, d.v));
     },
     mode(d) { commit(() => { G().mode = d.v; G().draft.alt = 0; G().draft.plan = null; }); },
-    'flip-on'() { commit(() => { const d = G().draft; d.on = ctx().on === 'O' ? 'D' : 'O'; d.alt = 0; d.plan = null; d.line = {}; }); },
+    'flip-on'() { commit(() => { const d = G().draft; d.on = ctx().on === 'O' ? 'D' : 'O'; d.alt = 0; d.plan = null; }); },
     'flip-ratio'() { commit(() => { const d = G().draft; d.ratio = ctx().ratio === 'W' ? 'M' : 'W'; d.alt = 0; d.plan = null; }); },
     'start-point'(d) {
       const c = ctx(), g = G(), line = { ...g.draft.line };
       stopVoice();
-      commit(() => { g.live = { lineup: Object.keys(line), roles: line, on: c.on, ratio: c.ratio, startedAt: Date.now(), puller: (d && d.puller) || null, avail: S.players.filter((p) => !g.out[p.id]).map((p) => p.id), subs: [], events: [] }; sel = null; voice = null; });
+      commit(() => { g.live = { lineup: Object.keys(line), roles: line, on: c.on, ratio: c.ratio, startedAt: Date.now(), ...(d && d.untimed ? { untimed: true, pausedAt: Date.now() } : {}), puller: (d && d.puller) || null, avail: S.players.filter((p) => !g.out[p.id]).map((p) => p.id), subs: [], events: [] }; sel = null; voice = null; });
       if (openMic) startOpenMic();
     },
     puller() {
@@ -2440,7 +2445,10 @@ ${JSON.stringify(data)}`;
       stopVoice();
       commit(() => {
         const { pausedAt, review, ...finished } = l;
-        g.points.push({ ...finished, endedAt: pausedAt, result: review.result });
+        // An untimed point counts as a typical point of this game, so playtime and rest still add up.
+        let end = pausedAt;
+        if (finished.untimed) { const d = g.points.filter((p) => !p.untimed).map((p) => p.endedAt - p.startedAt).sort((a, b) => a - b); end = finished.startedAt + (d.length ? d[Math.floor(d.length / 2)] : 3 * E.MIN); }
+        g.points.push({ ...finished, endedAt: end, result: review.result });
         g.live = null; sel = null; voice = null; fixLine = false;
         g.draft = newDraft(pv.line ? { ids: pv.line.ids, on: pv.ctx.on } : null);
         const before = E.score({ points: g.points.slice(0, -1) }), after = E.score(g);
@@ -2605,6 +2613,11 @@ ${JSON.stringify(data)}`;
     'menu-close'() { uiChange(() => { menu = null; }); },
     stat(d) { const id = menu.id; menu = null; if (d.v === 'goal' && editIdx === null && !G().live.review) { addStats([{ t: 'goal', id }]); A.result({ v: 'us' }); return; } (editIdx !== null ? commit : commitLight)(() => addStats([{ t: d.v, id, ...(d.sub ? { sub: d.sub } : {}) }])); },
     'opp-pass'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'opppass' }])); },
+    'our-turn'() {
+      const touches = E.chainOf(activePt().events).filter((e) => e.t === 'touch'), who = touches.length ? touches[touches.length - 1].id : null;
+      if (!who) { flash('Tap who had the disc first, or hold their name for Turnover.'); return; }
+      (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'turn', id: who }]));
+    },
     'opp-turn'() { (editIdx !== null ? commit : commitLight)(() => addStats([{ t: 'oppturn' }])); },
     'open-box'(d) { uiChange(() => { boxOpen = true; sheetOpen = false; tab = 'game'; pointsSource = d.v || 'current'; }); window.scrollTo(0, 0); },
     'sheet-line'(d) {
@@ -3477,6 +3490,7 @@ ${JSON.stringify(data)}`;
         if (changed) settle();
       }, (e) => { problem = `Sync stopped: ${e.message}`; if (!dragging) render(); });
     }
+    if (!native()) auth.getRedirectResult().catch((e) => { if (e && e.code && e.code !== 'auth/no-auth-event') { problem = e.code === 'auth/unauthorized-domain' ? `Sign-in isn't turned on for ${location.hostname} yet. Add it under Authentication, Settings, Authorized domains in the Firebase console.` : `Sign-in didn't finish. (${e.code})`; settingsOpen = true; render(); } });
     auth.onAuthStateChanged((u) => {
       if (stopTeams) { stopTeams(); stopTeams = null; }
       [...listeners.keys()].forEach(stopTeam);
@@ -3522,9 +3536,20 @@ ${JSON.stringify(data)}`;
           if (native()) {
             const r = await nativeAuth().signInWithGoogle();
             await auth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential(r.credential.idToken));
-          } else await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
+          } else {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            try { await auth.signInWithPopup(provider); } catch (e) {
+              // Browsers that block or can't open the popup sign in by leaving the page and coming back instead.
+              if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(e.code)) { await auth.signInWithRedirect(provider); return; }
+              throw e;
+            }
+          }
         } catch (e) {
-          problem = native() ? `Google sign-in didn't finish. (${e.message || e})` : `Sign-in didn't finish. (${e.message || e})`;
+          if (['auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/user-cancelled'].includes(e.code)) return;
+          problem = e.code === 'auth/unauthorized-domain'
+            ? `Sign-in isn't turned on for ${location.hostname} yet. In the Firebase console, open Authentication, then Settings, then Authorized domains, and add ${location.hostname}.`
+            : native() ? `Google sign-in didn't finish. (${e.code || e.message || e})` : `Sign-in didn't finish. (${e.code || e.message || e})`;
+          settingsOpen = true;
           render();
         }
       },
