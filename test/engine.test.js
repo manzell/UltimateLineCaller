@@ -295,7 +295,19 @@ for (const [n, mixed, mode] of [[12, false, 'balanced'], [14, false, 'develop'],
     ['Mavis got the block', 'block:Mavis'],
     ['number 12 to number 13', 'touch:Kyle touch:Mavis'],
     ['Lucie to Kyle goal Mavis', 'touch:Lucie touch:Kyle touch:Mavis goal:Mavis'],
+    ['Kyle completion to Mavis, completion Bea', 'touch:Kyle touch:Mavis touch:Bea'],
+    ['Kyle, completion, Lucie, turnover', 'touch:Kyle touch:Lucie turn:Lucie'],
+    ['opponent completion, opponent completion, opponent turnover', 'opppass opppass oppturn'],
+    ['Opponent Completion. Opponent Turnover. Kyle to Bea', 'opppass oppturn touch:Kyle touch:Bea'],
+    ['they completed a pass then they turned it over', 'opppass oppturn'],
   ];
+  {
+    const r = E.parsePlay('Turnover', people, { holder: 'x2' }), got = r.events.filter((e) => !e.seed).map((e) => e.t + ':' + e.id).join(' ');
+    check(got === 'turn:x2', 'lone "turnover" goes to whoever has the disc: ' + got);
+    const c = E.parsePlay('completion to Mavis', people, { holder: 'x2' }), cs = c.events.map((e) => e.t + ':' + e.id).join(' ');
+    check(cs === 'touch:x2 touch:x3', 'lone "completion to Mavis" follows the holder: ' + cs);
+    check(E.parsePlay('Kyle completion', people).needsCatcher, 'completion with no catcher is flagged');
+  }
   for (const [text, want] of cases) { const got = show(E.parsePlay(text, people)); check(got === want, `"${text}" -> ${got}`); }
   check(E.parsePlay('Bea to Cal, they scored', people).theyScored, 'they scored');
   check(E.parsePlay('Bea to Bob the wizard', people).unknown.includes('wizard'), 'unknown words reported');

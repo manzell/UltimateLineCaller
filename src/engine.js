@@ -648,6 +648,8 @@ const Engine = (() => {
   for (const w of 'throwaway throwaways turf turfed overthrow overthrew overthrown incomplete'.split(' ')) KW.set(w, 'throwaway');
   for (const w of 'turnover turnovers turn stall stalled fumble fumbled'.split(' ')) KW.set(w, 'turn');
   KW.set('oppturn', 'oppturn');
+  KW.set('opppass', 'opppass');
+  for (const w of 'completion completions complete completed completes'.split(' ')) KW.set(w, 'comp');
   for (const w of 'drop drops dropped bobbled missed'.split(' ')) KW.set(w, 'drop');
   for (const w of 'block blocks blocked d dee ds takeaway swat swats swatted'.split(' ')) KW.set(w, 'block');
   for (const w of 'interception interceptions intercept intercepted intercepts'.split(' ')) KW.set(w, 'int');
@@ -726,7 +728,8 @@ const Engine = (() => {
   // The words the recognizer listens for in roster mode: this team's names plus how coaches call plays.
   function speechVocabulary(players, positions) {
     const words = new Set(['[unk]', 'they', 'scored', 'score', 'threw', 'throw', 'throws', 'away', 'out', 'of', 'bounds', 'turned', 'turns', 'it', 'over', 'other', 'team', 'opponent', 'opponents', 'their', 'for', 'the', 'point', 'knocked', 'use', 'suggestion', 'suggested', 'clear', 'start', 'take', 'swap', 'switch', 'replace', 'sub', 'substitute', 'remove', 'bench', 'sit', 'in', 'number']);
-    for (const w of KW.keys()) if (w !== 'oppturn') words.add(w);
+    for (const w of KW.keys()) if (w !== 'oppturn' && w !== 'opppass') words.add(w);
+    ['pass', 'passes'].forEach((w) => words.add(w));
     for (const w of STOP) words.add(w);
     ONES.concat(TENS).filter(Boolean).forEach((w) => words.add(w));
     for (const pos of positions) { const n = clean(pos.name); n.split(' ').forEach((w) => { words.add(w); words.add(w + 's'); }); }
@@ -743,8 +746,9 @@ const Engine = (() => {
 
   function preparePlay(text) {
     return ` ${clean(text)} `
-      .replace(/ (they|opponents?|other team|their( \w+)?)( \w+)? (turned it over|turn it over|turnover|dropped it|dropped|drop it|threw it away|throw it away|turfed it|turfed)( it)? /g, ' oppturn ')
-      .replace(/ (opponent|other team) turnover /g, ' oppturn ')
+      .replace(/ (they|opponents?|other team|their( \w+)?)( \w+)? (turned it over|turn it over|turnover|dropped it|dropped|drop it|threw it away|throw it away|turfed it|turfed)( it)?(?= )/g, ' oppturn')
+      .replace(/ (opponent|other team) turnover(?= )/g, ' oppturn')
+      .replace(/ (they|opponents?|other team|their)( \w+)? (completion|completions|completed|complete|completes|pass|passes|passed)( it| a pass)?(?= )/g, ' opppass')
       .replace(/ (turned|turns|turn) it over /g, ' turn ')
       .replace(/ for the point /g, ' goal ')
       .replace(/ knocked (it )?down /g, ' block ')
@@ -785,6 +789,7 @@ const Engine = (() => {
         viaTo = viaBy = viaFrom = false; i += m.w; continue;
       }
       if (t === 'theyscored') seq.push({ k: 'they' });
+      else if (KW.get(t) === 'comp') { seq.push({ k: 'comp' }); viaTo = true; }
       else if (KW.has(t)) seq.push({ k: KW.get(t) });
       else if (TO_WORDS.has(t)) viaTo = true;
       else if (t === 'by') viaBy = true;
@@ -793,7 +798,7 @@ const Engine = (() => {
       i++;
     }
     const events = opts && opts.holder ? [{ t: 'touch', id: opts.holder, seed: true }] : [];
-    let theyScored = false, nameless = false;
+    let theyScored = false, nameless = false, needsCatcher = false;
     const lastTouchIdx = () => { for (let i = events.length - 1; i >= 0; i--) if (events[i].t === 'touch') return i; return -1; };
     const touch = (it) => { const l = events[events.length - 1]; if (l && l.t === 'touch' && l.id === it.id) return; events.push({ t: 'touch', id: it.id, unsure: it.unsure, via: it.via }); };
     for (let i = 0; i < seq.length; i++) {
@@ -828,9 +833,11 @@ const Engine = (() => {
       } else if (it.k === 'assist') {
         if (nx && nx.k === 'p') { events.push({ t: 'assist', id: nx.id, unsure: nx.unsure }); i++; }
       } else if (it.k === 'oppturn') events.push({ t: 'oppturn' });
+      else if (it.k === 'opppass') events.push({ t: 'opppass' });
+      else if (it.k === 'comp') { if (!(nx && nx.k === 'p')) needsCatcher = true; }
       else if (it.k === 'they') theyScored = true;
     }
-    return { events, unknown, theyScored, nameless, hasGoal: events.some((e) => e.t === 'goal') || nameless };
+    return { events, unknown, theyScored, nameless, needsCatcher, hasGoal: events.some((e) => e.t === 'goal') || nameless };
   }
 
   function prepareLine(text) {

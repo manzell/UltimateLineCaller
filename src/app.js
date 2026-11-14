@@ -376,12 +376,15 @@
   const notes = (unknown) => (unknown.length ? `<p class="small muted">Words not used: ${esc(unknown.join(', '))}. If one is a name, add it under that player's "Sounds like".</p>` : '');
   const benchNow = () => { const on = liveOnField(); return S.players.filter((p) => !on.includes(p.id) && !G().out[p.id]); };
   const parseLive = (text, opts) => E.parsePlay(text, liveOnField().filter(P).map(P), { ...opts, bench: benchNow() });
+  // Who has the disc now, so "turnover" or "completion to Bea" on its own follows on from the last touch.
+  const holderNow = () => { const t = E.chainOf(activePt().events).filter((e) => e.t === 'touch'); return t.length ? t[t.length - 1].id : undefined; };
   const canEndByVoice = () => editIdx === null && G().live && !G().live.review;
   function playPreview() {
-    const r = parseLive(voice.text);
+    const r = parseLive(voice.text, { holder: holderNow() });
+    r.events = r.events.filter((e) => !e.seed);
     const items = narrativeHtml(r.events, false, true);
     const any = r.events.length;
-    return `<div class="chain">${items || '<span class="muted">No players recognized yet.</span>'}</div>${r.events.some((e) => e.unsure) ? '<p class="small muted">A ? means the name was a close guess.</p>' : ''}${notes(r.unknown)}
+    return `<div class="chain">${items || '<span class="muted">No players recognized yet.</span>'}</div>${r.events.some((e) => e.unsure) ? '<p class="small muted">A ? means the name was a close guess.</p>' : ''}${notes(r.unknown)}${r.needsCatcher ? '<p class="small muted">Say who caught the completion, like "completion to Bea".</p>' : ''}
       <div class="chips">${r.hasGoal && canEndByVoice() ? '' : `<button type="button" class="btn small-btn" data-a="voice-add" ${any ? '' : 'disabled'}>Add to this point</button>`}
       ${r.hasGoal && canEndByVoice() ? '<button type="button" class="btn small-btn primary" data-a="voice-add" data-v="us">Add and we scored</button>' : ''}
       ${r.theyScored && canEndByVoice() ? '<button type="button" class="btn small-btn primary" data-a="voice-add" data-v="them">Add and they scored</button>' : ''}</div>`;
@@ -412,6 +415,7 @@
         <section class="panel">
           <div class="panel-head"><h2>Your line</h2>${legend()}${energyKey}<span class="right"><span class="small muted">${ids.length} of ${target}</span>
             <button type="button" class="btn small-btn" data-a="voice-open" data-v="line">Voice</button>
+            ${g.points.length ? '<button type="button" class="btn small-btn" data-a="reload-last">Reload last lineup</button>' : ''}
             ${ids.length ? '<button type="button" class="btn small-btn" data-a="clear-line">Clear</button>' : ''}</span></div>
           ${voiceBox()}
           ${positionGroups()}
@@ -2414,6 +2418,12 @@ ${JSON.stringify(data)}`;
     },
     mode(d) { commit(() => { G().mode = d.v; G().draft.alt = 0; G().draft.plan = null; }); },
     'flip-on'() { commit(() => { const d = G().draft; d.on = ctx().on === 'O' ? 'D' : 'O'; d.alt = 0; d.plan = null; }); },
+    'reload-last'() {
+      const g = G(), last = g.points[g.points.length - 1]; if (!last) return;
+      const ids = last.lineup.filter((id) => P(id) && !g.out[id]).slice(0, targetSize()), gone = last.lineup.length - ids.length;
+      commit(() => { g.draft.line = {}; ids.forEach((id) => { g.draft.line[id] = (last.roles && last.roles[id]) || bestPos(id); }); sel = null; });
+      if (gone > 0) flash(`${gone} from the last line ${gone === 1 ? "isn't" : "aren't"} available. Pick ${gone === 1 ? 'a replacement' : 'replacements'}.`);
+    },
     'flip-ratio'() { commit(() => { const d = G().draft; d.ratio = ctx().ratio === 'W' ? 'M' : 'W'; d.alt = 0; d.plan = null; }); },
     'start-point'(d) {
       const c = ctx(), g = G(), line = { ...g.draft.line };
@@ -2673,7 +2683,8 @@ ${JSON.stringify(data)}`;
       });
     },
     'voice-add'(d) {
-      const r = parseLive(voice.text);
+      const r = parseLive(voice.text, { holder: holderNow() });
+      r.events = r.events.filter((e) => !e.seed);
       stopVoice();
       if (d.v) { addStats(r.events); voice = null; A.result({ v: d.v }); return; }
       commitLight(() => { addStats(r.events); voice = null; });
@@ -3537,8 +3548,10 @@ ${JSON.stringify(data)}`;
             const r = await nativeAuth().signInWithGoogle();
             await auth.signInWithCredential(firebase.auth.GoogleAuthProvider.credential(r.credential.idToken));
           } else {
-            const provider = new firebase.auth.GoogleAuthProvider();
+            const provider = new firebase.auth.GoogleAuthProvider(), t0 = Date.now();
             try { await auth.signInWithPopup(provider); } catch (e) {
+              // A window that shuts within a few seconds wasn't closed by a person: the browser or Google shut it.
+              if (e.code === 'auth/popup-closed-by-user' && Date.now() - t0 < 4000) e.code = 'quick-close';
               // Browsers that block or can't open the popup sign in by leaving the page and coming back instead.
               if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported'].includes(e.code)) { await auth.signInWithRedirect(provider); return; }
               throw e;
@@ -3546,7 +3559,10 @@ ${JSON.stringify(data)}`;
           }
         } catch (e) {
           if (['auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/user-cancelled'].includes(e.code)) return;
-          problem = e.code === 'auth/unauthorized-domain'
+          console.warn('Sign-in failed', e.code, e.message);
+          problem = e.code === 'quick-close'
+            ? `The Google window closed by itself before sign-in finished. This browser may be blocking the sign-in window from talking back to the page. Allow pop-ups and third-party cookies for ${location.hostname}, or try Chrome, then sign in again.`
+            : e.code === 'auth/unauthorized-domain'
             ? `Sign-in isn't turned on for ${location.hostname} yet. In the Firebase console, open Authentication, then Settings, then Authorized domains, and add ${location.hostname}.`
             : native() ? `Google sign-in didn't finish. (${e.code || e.message || e})` : `Sign-in didn't finish. (${e.code || e.message || e})`;
           settingsOpen = true;
